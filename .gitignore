@@ -1,0 +1,12 @@
+# Runtime preferences written by the app on this machine.
+user_settings.ini
+
+# Internal, machine-specific audit instructions.
+PROMPT-AUDITORIA.md
+
+# Editor and operating-system files.
+.vscode/
+.idea/
+*.log
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,2 @@
+# Keep the large prerecorded voice pack out of normal Git object history.
+audio/sally/**/*.wav filter=lfs diff=lfs merge=lfs -text
