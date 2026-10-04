@@ -1,7 +1,7 @@
 <a id="top"></a>
 <div align="center">
 
-<img src="../assets/sally-hero.svg" alt="AC Engineer Sally — your team on the radio" width="100%">
+<img src="../assets/sally-hero.svg?v=2" alt="AC Engineer Sally — your team on the radio" width="100%">
 <p><img src="../icon.png" width="112" alt="Sally wearing a headset"></p>
 
 <h1>🎙️ AC Engineer Sally</h1>

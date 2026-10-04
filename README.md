@@ -1,7 +1,7 @@
 <a id="top"></a>
 <div align="center">
 
-<img src="assets/sally-hero.svg" alt="AC Engineer Sally — sua equipe, no rádio" width="100%">
+<img src="assets/sally-hero.svg?v=2" alt="AC Engineer Sally — sua equipe, no rádio" width="100%">
 <br>
 <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&amp;weight=600&amp;size=21&amp;duration=2800&amp;pause=1000&amp;color=FFD43B&amp;center=true&amp;vCenter=true&amp;width=760&amp;lines=Sua+equipe%2C+no+r%C3%A1dio.;Spotter+%E2%80%A2+Combust%C3%ADvel+%E2%80%A2+Estrat%C3%A9gia;Voc%C3%AA+pilota.+Sally+acompanha." alt="Sua equipe no rádio. Você pilota, Sally acompanha.">
 
