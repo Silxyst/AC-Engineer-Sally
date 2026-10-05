@@ -16,7 +16,7 @@ function Strat.fresh()
     finished = false, need = nil, margin = nil,
     laps = {}, paceMs = nil, paceTrendMs = nil, paceN = 0,
     secAvg = { nil, nil, nil }, secBest = { nil, nil, nil },
-    secBuf = { {}, {}, {} }, lastMs = nil, bestMs = nil,
+    secBuf = { {}, {}, {} }, lastMs = nil, bestMs = nil, lastAllGood = false,
     stintStartLap = nil, stintLaps = 0,
     available = false }
 end
@@ -57,6 +57,7 @@ function Strat:closeLap(S)
   self._lap = { lap = lap, fuel = S.fuel, t = S.lapMs }
   if not prev then return end
   if lap <= prev.lap then return end -- volta para tras/restart: ignora
+  st.lastAllGood = false
   -- Fecha o setor 3 (tempo desde a marca de 2/3).
   if self._secIdx == 2 and self._secClock and self._secClock > 5 and self._secClock < 300 then
     self._secTimes[3] = self._secClock
@@ -70,7 +71,8 @@ function Strat:closeLap(S)
     st.perLap = average(st.samplesList)
   end
   local lapMs = S.lastMs
-  if lapMs and lapMs > 30000 and lapMs < 1200000 then
+  local validLap = S.lastValid == true
+  if validLap and lapMs and lapMs > 30000 and lapMs < 1200000 then
     pushCapped(st.laps, { timeMs = lapMs, fuelUsedL = used }, 12)
     -- Ritmo: media recente.
     local times = {}
@@ -93,8 +95,10 @@ function Strat:closeLap(S)
   -- Setores da volta fechada: prefere os splits reais do jogo
   -- (S.lastSplits); senao usa o rastreador de spline.
   local sec = self._secTimes
-  if S.inPit then sec = {} end
-  if (not (sec[1] and sec[2] and sec[3])) and S.lastSplits then sec = S.lastSplits end
+  if S.inPit or not validLap then sec = {} end
+  if validLap and (not (sec[1] and sec[2] and sec[3])) and S.lastSplits then
+    sec = S.lastSplits
+  end
   st.lastPurple = nil
   st.purpleLap = nil
   if sec[1] and sec[2] and sec[3] then
@@ -104,6 +108,14 @@ function Strat:closeLap(S)
       sumOk = math.abs((sec[1] + sec[2] + sec[3]) - lapMs / 1000) < 8
     end
     if sumOk then
+      local allGood = true
+      for i = 1, 3 do
+        local previousAverage = st.secAvg[i]
+        if not previousAverage or #st.secBuf[i] < 3 or sec[i] > previousAverage * 1.01 then
+          allGood = false
+        end
+      end
+      st.lastAllGood = allGood
       for i = 1, 3 do
         if S.bestSplits and S.bestSplits[i] and (not st.secBest[i] or S.bestSplits[i] < st.secBest[i]) then
           st.secBest[i] = S.bestSplits[i]
@@ -169,8 +181,15 @@ function Strat:update(S)
   st.timed = S.timed == true
   st.finished = S.finished == true
   st.stintLaps = math.max(0, (S.lap or 0) - st.stintStartLap)
-  if S.lastMs then st.lastMs = S.lastMs end
-  if S.bestMs and (not st.bestMs or S.bestMs < st.bestMs) then st.bestMs = S.bestMs end
+  -- Nao deixa uma volta invalidada sobrescrever os dados usados pelos
+  -- comentarios de ritmo. O consumo continua sendo fechado em closeLap().
+  if S.lastValid == true then
+    if S.lastMs and S.lastMs > 30000 and S.lastMs < 1200000 then st.lastMs = S.lastMs end
+    if S.bestMs and S.bestMs > 30000 and S.bestMs < 1200000
+        and (not st.bestMs or S.bestMs < st.bestMs) then
+      st.bestMs = S.bestMs
+    end
+  end
   -- Autonomia e conta de chegada.
   if st.fuel and st.perLap and st.perLap > 0 then
     st.range = st.fuel / st.perLap

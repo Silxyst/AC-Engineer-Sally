@@ -1,5 +1,5 @@
 -- Fila de audio sequencial com interrupcao do spotter, beep, chiado de
--- radio e legendas. So toca .wav da Sally (+ sfx). Sem TTS, sem rede.
+-- radio e legendas. Todos os clips e comentarios de telemetria rodam localmente.
 
 local Voice = {}
 Voice.__index = Voice
@@ -21,6 +21,12 @@ local function dispose(ev)
   if not ev then return end
   pcall(function() ev:stop() end)
   pcall(function() ev:dispose() end)
+end
+
+local function outcome(entry, state, reason)
+  if entry and entry.onOutcome then
+    pcall(entry.onOutcome, state, reason, entry)
+  end
 end
 
 local function makeEvent(path, looped)
@@ -93,11 +99,15 @@ function Voice:enqueue(path, caption, who, opts)
     isBeep = opts.beep == true, volume = opts.vol, priority = opts.priority == true,
     priorityValue = num(opts.priorityValue or opts.priority),
     createdAt = self.clock, group = opts.group, key = opts.key or path,
-    valid = opts.valid, expiresAt = ttl and (self.clock + math.max(0, ttl)) or nil }
+    valid = opts.valid, onOutcome = opts.onOutcome,
+    expiresAt = ttl and (self.clock + math.max(0, ttl)) or nil }
   local current = self.playing and self.playing.entry
   if current and rank(entry) > rank(current) then
     if current.group then self:cancel(current.group, true)
-    else dispose(self.playing.event); self.playing = nil; self:_stopBg() end
+    else
+      outcome(current, 'interrupted', 'higher_priority')
+      dispose(self.playing.event); self.playing = nil; self:_stopBg()
+    end
   end
   local index = #self.queue + 1
   for i, queued in ipairs(self.queue) do
@@ -106,16 +116,22 @@ function Voice:enqueue(path, caption, who, opts)
   table.insert(self.queue, index, entry)
   -- The queue is sorted from highest to lowest priority: drop the least urgent
   -- backlog entry, never an alert or spotter call at the front.
-  while #self.queue > 40 do table.remove(self.queue) end
+  while #self.queue > 40 do
+    local dropped = table.remove(self.queue)
+    outcome(dropped, 'dropped', 'queue_full')
+  end
   return true
 end
 
 function Voice:cancel(group, stopPlaying)
   if group == nil then return end
   for i = #self.queue, 1, -1 do
-    if self.queue[i].group == group then table.remove(self.queue, i) end
+    if self.queue[i].group == group then
+      outcome(table.remove(self.queue, i), 'dropped', 'cancelled')
+    end
   end
   if stopPlaying and self.playing and self.playing.entry.group == group then
+    outcome(self.playing.entry, 'interrupted', 'cancelled')
     dispose(self.playing.event)
     self.playing = nil
     self:_stopBg()
@@ -129,6 +145,7 @@ function Voice:interruptWith(path, caption, who, volume, preserveQueue, opts)
   local ttl = num(opts.ttl)
   local entry = { path = path, caption = caption, speaker = who, volume = volume,
     interrupt = true, createdAt = self.clock, group = opts.group, key = opts.key or path,
+    onOutcome = opts.onOutcome,
     priorityValue = 100, valid = opts.valid,
     expiresAt = ttl and (self.clock + math.max(0, ttl)) or nil }
   local current = self.playing and self.playing.entry
@@ -138,7 +155,10 @@ function Voice:interruptWith(path, caption, who, volume, preserveQueue, opts)
     return true
   end
   local interruptedGroup = current and current.group
-  if self.playing then dispose(self.playing.event) end
+  if self.playing then
+    outcome(self.playing.entry, 'interrupted', 'spotter')
+    dispose(self.playing.event)
+  end
   self.playing = nil
   local pending = self.queue
   self.queue = { entry }
@@ -146,16 +166,25 @@ function Voice:interruptWith(path, caption, who, volume, preserveQueue, opts)
     local sameReport = interruptedGroup ~= nil and queued.group == interruptedGroup
     if not queued.interrupt and not sameReport and (preserveQueue or rank(queued) >= 70) then
       self.queue[#self.queue + 1] = queued
+    else
+      outcome(queued, 'dropped', 'spotter_queue_clear')
     end
   end
-  while #self.queue > 40 do table.remove(self.queue) end
+  while #self.queue > 40 do
+    local dropped = table.remove(self.queue)
+    outcome(dropped, 'dropped', 'queue_full')
+  end
   self:_stopBg()
   return true
 end
 
 function Voice:clear()
+  for _, entry in ipairs(self.queue) do outcome(entry, 'dropped', 'clear') end
   self.queue = {}
-  if self.playing then dispose(self.playing.event) end
+  if self.playing then
+    outcome(self.playing.entry, 'interrupted', 'clear')
+    dispose(self.playing.event)
+  end
   self.playing = nil
   self:_stopBg()
 end
@@ -175,7 +204,8 @@ function Voice:_startNext()
     local first = self.queue[1]
     if first.expiresAt and self.clock >= first.expiresAt then
       table.remove(self.queue, 1)
-      self:cancel(first.group, false)
+      outcome(first, 'dropped', 'expired')
+      if first.group then self:cancel(first.group, false) end
     elseif self.gate and rank(first) < 70 and not self.gate(first) then
       self:_stopBg()
       return
@@ -184,6 +214,7 @@ function Voice:_startNext()
       local valid = true
       if entry.valid then local ok, result = pcall(entry.valid); valid = ok and result == true end
       if not valid then
+        outcome(entry, 'dropped', 'invalid')
         self:cancel(entry.group, false)
       else
         local ev = makeEvent(entry.path, false)
@@ -203,9 +234,12 @@ function Voice:_startNext()
           if not entry.isBeep and entry.caption and self.onCaption then
             pcall(self.onCaption, entry.caption, entry.speaker, entry)
           end
+          outcome(entry, 'started')
+          if self.onEntryStart then pcall(self.onEntryStart, entry) end
           return
         end
         dispose(ev)
+        outcome(entry, 'dropped', 'audio_start_failed')
         if not entry.isBeep then self:cancel(entry.group, false) end
       end
     end
@@ -239,6 +273,7 @@ function Voice:update(dt)
     return
   end
   if evEnded(self.playing, self.clock) then
+    outcome(self.playing.entry, 'finished')
     dispose(self.playing.event)
     self:_startNext()
   end

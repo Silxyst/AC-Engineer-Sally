@@ -23,7 +23,7 @@ Voz gravada, telemetria ao vivo e uma central para acompanhar seu stint.</p>
 <img src="https://img.shields.io/badge/Assetto_Corsa-CSP-DC2626?style=flat-square&amp;logo=steam&amp;logoColor=white" alt="Assetto Corsa com CSP">
 <img src="https://img.shields.io/badge/Lua-2C2D72?style=flat-square&amp;logo=lua&amp;logoColor=white" alt="Lua">
 <img src="https://img.shields.io/badge/interface-PT--BR_%7C_EN-22C55E?style=flat-square" alt="Interface em português e inglês">
-<img src="https://img.shields.io/badge/runtime-100%25_offline-334155?style=flat-square" alt="Execução offline">
+<img src="https://img.shields.io/badge/comentarios-locais-2563EB?style=flat-square" alt="Comentários locais por telemetria">
 <a href="LICENSE"><img src="https://img.shields.io/github/license/Silxyst/AC-Engineer-Sally?style=flat-square&amp;color=FFD43B" alt="Licença do código"></a>
 <a href="https://github.com/Silxyst/AC-Engineer-Sally/stargazers"><img src="https://img.shields.io/github/stars/Silxyst/AC-Engineer-Sally?style=flat-square&amp;logo=github&amp;color=FFD43B" alt="Estrelas no GitHub"></a>
 </p>
@@ -66,7 +66,7 @@ Voz gravada, telemetria ao vivo e uma central para acompanhar seu stint.</p>
 </td>
 <td valign="top">
 <h3>🌍 Do seu jeito</h3>
-<p>Interface e legendas em PT-BR ou inglês, volumes separados e ajustes de voz. O áudio Sally é gravado em inglês e roda localmente.</p>
+<p>Interface e legendas em PT-BR ou inglês, volumes separados e ajustes de voz. O áudio Sally é gravado em inglês e roda localmente; regras de telemetria escolhem comentários de corrida sem internet.</p>
 </td>
 </tr>
 </table>
@@ -76,8 +76,9 @@ Voz gravada, telemetria ao vivo e uma central para acompanhar seu stint.</p>
 - **Rádio organizado:** fila com prioridades, prazo de validade e cooldowns para os avisos.
 - **Chuva e recursos do carro:** alertas de condições, DRS, ERS e push-to-pass quando os dados correspondentes estiverem disponíveis.
 - **Teste direto no app:** Radio check, testes do spotter, sequência de chamadas e catálogo de frases.
+- **Comentários por telemetria:** regras locais escolhem clips Sally já gravados após voltas válidas em treino, qualificação ou corrida, considerando ritmo e posição. Não usa IA online, chave ou internet.
 - **Preferências locais:** seus ajustes ficam em `user_settings.ini` e são preservados entre usos.
-- **Pack incluído:** 25 categorias e **5.952 WAVs Sally**, armazenados com Git LFS.
+- **Pack incluído:** 25 categorias e **6.222 WAVs Sally**, armazenados com Git LFS.
 
 <a id="radio"></a>
 ## 📻 Da telemetria ao rádio
@@ -90,7 +91,7 @@ Sally lê a situação, aplica os gatilhos dos avisos e organiza as falas. Ao de
 |:---|:---|
 | **AC Engineer Sally** | Caixa compacta de rádio com a legenda da chamada atual. |
 | **AC Engineer Sally — Central de Corrida** | Cartões de telemetria, pneus, status do spotter, histórico e botão de rádio ligado/desligado. |
-| **Settings / Ajustes** | Idioma, áudio, avisos, testes e catálogo; acessível pelos ajustes da janela principal. |
+| **Settings / Ajustes** | Idioma, áudio, avisos, testes, prévia das expressões, comentários por telemetria e catálogo; acessível pelos ajustes da janela principal. |
 
 <img src="assets/sally-divider.svg" alt="" width="100%">
 
@@ -160,6 +161,7 @@ A pasta e o arquivo de entrada devem manter o nome **`AC-Engineer-Sally`**.
 | **Resumo e frequência** | Define os resumos por volta e o intervalo do status de combustível. |
 | **Reserva** | Define a margem de combustível em voltas para o cálculo de estratégia. |
 | **Rants · 0–3** | Ajusta as reações opcionais de Sally; o padrão distribuído é `0` (desligado). |
+| **Comentários de corrida** | Liga ou desliga as falas locais escolhidas por ritmo e posição após voltas válidas. |
 
 `config.ini` fornece os valores iniciais. Alterações feitas no app são salvas em **`user_settings.ini`**, que tem prioridade sobre os padrões e fica fora do Git.
 
@@ -183,7 +185,7 @@ A voz gravada é em <strong>inglês</strong>. A seleção <strong>Português / E
 <details>
 <summary><strong>📡 Preciso de internet para usar o app?</strong></summary>
 <br>
-Depois do download, o app usa telemetria do simulador e arquivos locais. A execução é <strong>offline</strong>.
+O rádio, os avisos e os comentários por telemetria funcionam localmente, sem internet ou chave de API.
 </details>
 
 <details>

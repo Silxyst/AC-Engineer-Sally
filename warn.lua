@@ -19,6 +19,8 @@ function Warn:reset()
   self._engBase, self._wasHot, self._blankets = nil, nil, nil
   self._briefSeen, self._pendingBrief = 0, nil
   self._penaltyType, self._penaltySince = nil, nil
+  self._stopGoPending = false
+  self._rpCutVersion, self._rpCutCount, self._rpCutTotal, self._lastRPCutAt = 0, 0, nil, nil
   self._nextFuelStatus, self._pendingRant = nil, nil
   self._t0, self._gridPos, self._wasBattle = nil, nil, false
   self._spins, self._gapT, self._gapPrevA, self._gapPrevB = 0, 0, nil, nil
@@ -30,7 +32,13 @@ function Warn:reset()
   self._tempT, self._tempBase = 0, nil
   self._drsWas, self._drsIdle, self._compound = nil, nil, nil
   self._pitReq, self._p2p = nil, nil
+  self._pitServiceStarted, self._pitServiceClearSince = false, nil
+  self._pitServiceCompleteCalled, self._pitStopRequested = false, false
   self._lastLapKey, self._lastCutsKey = nil, nil
+  self._nextTyreReportAt = nil
+  self._lowBattLatched = false
+  self._criticalBattLatched = false
+  self._slowCarState, self._slowCarClearSince = nil, nil
 end
 
 local function ready(self, id, seconds, now)
@@ -42,6 +50,16 @@ end
 local function once(self, id)
   if self.once[id] then return false end
   self.once[id] = true
+  return true
+end
+
+-- Evita que pressao, camber, temperatura e desgaste gerem uma sequencia de
+-- radios no mesmo ciclo. Alertas urgentes podem furar a janela compartilhada.
+local function tyreReady(self, id, seconds, now, urgent)
+  if not urgent and (self._nextTyreReportAt or -1e9) > now then return false end
+  if not ready(self, id, seconds, now) then return false end
+  self._nextTyreReportAt = math.max(self._nextTyreReportAt or -1e9,
+    now + (urgent and 10 or 45))
   return true
 end
 
@@ -98,14 +116,35 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     else api.say('lap_counter', 'get_ready', 'Prepare-se', { noBeep = true }) end
     api.done()
   end
-  if S.finished and once(self, 'finish') then
-    api.started('auto_finish')
-    local pos = S.pos or 99
-    if pos == 1 then
-      if math.random() < 0.5 then api.say('lap_counter', 'won_race', 'Vitória!', {})
-      else api.say('pearls_of_wisdom', 'keep_it_up', 'Vitória!', {}) end
-    elseif pos == 2 or pos == 3 then api.say('lap_counter', 'podium_finish', 'Pódio!', {})
-    else api.say('lap_counter', 'finished_race_good_finish', 'Fim', {}) end
+  -- O numero nos WAVs representa uma variacao da fala, nao a colocacao.
+  -- So anuncia resultado quando a sessao encerrada for uma corrida.
+  if S.finished and S.sessType == 3 and once(self, 'finish') then
+    api.started('auto_finish', 70)
+    local pos = tonumber(S.pos)
+    local fieldSize = tonumber(S.carsCount)
+    if pos then pos = math.floor(pos) end
+    if fieldSize then fieldSize = math.floor(fieldSize) end
+
+    local phrase, caption = 'finished_race', 'Fim de corrida'
+    if pos and pos >= 1 then
+      if pos == 1 then
+        phrase, caption = 'won_race', 'Vitória! Primeiro lugar.'
+      elseif pos <= 3 then
+        phrase = 'podium_finish'
+        caption = pos == 2 and 'P2! Pódio.' or 'P3! Pódio.'
+      elseif fieldSize and fieldSize > 1 and pos == fieldSize then
+        phrase, caption = 'finished_race_last', 'Último lugar. Vamos recuperar.'
+      elseif fieldSize and fieldSize > 1 and pos <= math.ceil(fieldSize / 2) then
+        phrase, caption = 'finished_race_good_finish', 'Boa chegada!'
+      end
+    end
+    local finishOptions = { priority = true }
+    if phrase == 'podium_finish' then
+      finishOptions.takes = {
+        '1_op_suffix_well_done', '2_op_suffix_well_done', '3_op_prefix_well_done',
+      }
+    end
+    api.say('lap_counter', phrase, caption, finishOptions)
     if G.bestMs and G.bestMs > 0 then
       api.say('lap_times', 'personal_best', 'Sua melhor', { noBeep = true })
       local total = G.bestMs / 1000
@@ -115,6 +154,41 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
       api.say('timings', 'seconds', 'segundos', { noBeep = true })
     end
     api.done()
+  end
+  if S.finished and S.sessType and S.sessType ~= 3 and once(self, 'session_end') then
+    api.started('auto_session_end', 70)
+    api.say('lap_counter', 'end_of_session', 'Sessão concluída', { priority = true })
+    api.done()
+  end
+  -- O sinal de fim pode durar so um frame; a trava do evento evita avisos de
+  -- estrategia (por exemplo, push e DRS) durante a volta de retorno.
+  if S.finished or self.once.finish then return end
+
+  -- RP publica o contador de cortes no chat. Fala apenas quando o contador
+  -- local do jogador realmente avanca; deixa a mensagem visivel no chat.
+  local rpCuts = S.rpCutWarnings
+  if S.sessType == 3 and rpCuts and rpCuts.version ~= self._rpCutVersion then
+    self._rpCutVersion = rpCuts.version
+    local count, total = tonumber(rpCuts.count), tonumber(rpCuts.total)
+    if count and total and count >= 1 and count <= total then
+      if total ~= self._rpCutTotal or count < self._rpCutCount then
+        self._rpCutCount, self._rpCutTotal = 0, total
+      end
+      if count > self._rpCutCount then
+        self._rpCutCount, self._lastRPCutAt = count, now
+        local phrase = count == 1 and 'cut_track_race_1'
+          or count == 2 and 'cut_track_race_2'
+          or count == 3 and 'cut_track_race_3'
+          or (C.rantLevel or 0) >= 3 and 'cut_track_race_4'
+          or 'cut_track_race_3'
+        if count >= total or ready(self, 'rp_cut_warning', 15, now) then
+          api.started('auto_rp_cut_warning', 80)
+          api.say('penalties', phrase,
+            string.format('Aviso RealPenalty: corte %d/%d', count, total), { priority = true })
+          api.done()
+        end
+      end
+    end
   end
 
   -- Bandeiras.
@@ -163,6 +237,10 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
 
   -- Penalidade real do carro do jogador. Nao deduz tipo apenas pela bandeira.
   if S.penaltyType ~= nil then
+    local stopGoSeconds = tonumber(S.penaltyParameter)
+    if S.penaltyType == 2 and stopGoSeconds and stopGoSeconds > 0 and stopGoSeconds <= 120 then
+      self._stopGoPending = true
+    end
     local current, previous = S.penaltyType, self._penaltyType
     if current ~= previous then
       self._penaltyType = current
@@ -183,14 +261,11 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
             api.say('penalties', 'new_penalty_black_flag', 'Bandeira preta', {})
           end
         elseif current == 2 then
-          -- Real Penalty: sg* chega como drive-through com segundos de espera.
+          -- CSP descreve o tipo 2 como espera nos boxes com controles bloqueados;
+          -- tratamos a janela curta como RP Stop & Go quando o servidor a expõe.
           local sgSecs = param and param > 0 and param <= 120 and param or nil
-          if sgSecs and S.inPit then
-            api.say('penalties', 'stop_go_penalty_speeding_in_pit_lane', 'Stop&go no box', {})
-          elseif sgSecs and self._t0 and now - self._t0 < 30 and (S.lap or 0) == 0 then
-            api.say('penalties', 'stop_go_penalty_false_start', 'Queima de largada', {})
-          elseif sgSecs then
-            api.say('penalties', 'stop_go_penalty_cutting_track', 'Stop&go por corte', {})
+          if sgSecs then
+            api.say('penalties', 'new_penalty_stopgo', 'Stop & Go', {})
           elseif S.inPit then
             api.say('penalties', 'drive_through_speeding_in_pit_lane', 'Excesso no box', {})
           elseif self._t0 and now - self._t0 < 30 and (S.lap or 0) == 0 then
@@ -220,7 +295,12 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
       elseif (current == 0 or current == 5) and previous and previous > 0 and previous ~= 5 then
         self._penaltySince = nil
         api.started('auto_penalty_served')
-        api.say('penalties', 'penalty_served', 'Penalidade cumprida', {})
+        if self._stopGoPending then
+          api.say('mandatory_pit_stops', 'stop_complete_go', 'Stop & Go cumprido', { priority = true })
+          self._stopGoPending = false
+        else
+          api.say('penalties', 'penalty_served', 'Penalidade cumprida', {})
+        end
         api.done()
       end
     end
@@ -296,6 +376,7 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
           api.say('tyre_monitor', 'cold_tyres_all_round', 'Pneus frios', { priority = true })
         end
         api.done()
+        self._nextTyreReportAt = now + 45
       end
     else
       self._coldSince = nil
@@ -304,7 +385,7 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
         local band = (severe and 'cook' or 'mild') .. hottest
         if self._wasHot ~= band then
           self._wasHot = band
-          if ready(self, 'hot' .. band, 90, now) then
+          if tyreReady(self, 'hot' .. band, 90, now, severe) then
             api.started('auto_tyre')
             local clip = severe and HOT_WHEEL[hottest] or MILD_HOT_WHEEL[hottest]
             api.say('tyre_monitor', clip, severe and 'Pneu pegando fogo' or 'Pneu quente', { priority = true })
@@ -334,10 +415,16 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
   local damage = math.max(biggest, hit and hit.damageDelta or 0)
   local impact = hit and not S.inPit and ((hit.damageDelta or 0) >= 2
     or (hit.speedDrop or 0) >= 6 or (hit.impactSpeed or 0) >= 60)
-  if C.warnDamage and (damage >= 7 or impact)
+  -- So pergunta pelo piloto apos uma colisao realmente grave. Velocidade alta
+  -- sozinha nao indica batida: saltos e saidas de pista tambem geram contato.
+  local askDriver = hit and not S.inPit and (
+    damage >= 30
+    or ((hit.speedDrop or 0) >= 55 and (hit.impactSpeed or 0) >= 90)
+    or hit.engineLost == true)
+  if C.warnDamage and (damage >= 7 or askDriver)
       and ready(self, damage >= 20 and 'dmg_severe' or 'dmg', damage >= 20 and 60 or 25, now) then
     api.started('auto_damage', 90)
-    if impact then
+    if askDriver then
       api.say('damage_reporting', 'are_you_ok_first_try', 'Voce esta bem?', {})
     end
     if damage >= 20 then
@@ -383,7 +470,8 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     end
     if S.cutsLast and S.cutsLast > 0 and self._lastCutsKey ~= (S.lap or 0) then
       self._lastCutsKey = S.lap or 0
-      if ready(self, 'cuts', 120, now) then
+      local rpCoveredThisLap = self._lastRPCutAt and now - self._lastRPCutAt < 90
+      if not rpCoveredThisLap and ready(self, 'cuts', 120, now) then
         api.started('auto_cuts')
         api.say('penalties', 'cut_track_race_1', 'Track limits', {})
         api.num(S.cutsLast)
@@ -533,20 +621,62 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     api.done()
   end
 
-  -- Pedido de box confirmado.
-  if S.pitRequested and not self._pitReq and ready(self, 'pitreq', 60, now) then
-    api.started('auto_pitreq')
-    api.say('mandatory_pit_stops', 'pit_stop_requested', 'Box pedido', {})
-    api.done()
+    -- Pronto para sair: so depois de um servico observado e encerrado no box.
+    local serviceActive = S.changingTyres or S.refueling or S.repairing
+    if not S.inPit then
+      self._pitServiceStarted, self._pitServiceClearSince = false, nil
+      self._pitServiceCompleteCalled = false
+    elseif S.inStall then
+      if serviceActive then
+        self._pitServiceStarted = true
+        self._pitServiceClearSince = nil
+      elseif self._pitServiceStarted and not self._pitServiceCompleteCalled then
+        self._pitServiceClearSince = self._pitServiceClearSince or now
+        if now - self._pitServiceClearSince >= 1.0 and ready(self, 'pitcomplete', 30, now) then
+          self._pitServiceStarted, self._pitServiceCompleteCalled = false, true
+          if not self._stopGoPending then
+            api.started('auto_pitcomplete', 60)
+            api.say('mandatory_pit_stops', 'stop_complete_go', 'Parada concluída, pode sair', { priority = true })
+            api.done()
+          end
+        end
+      end
+    end
+
+    -- Pedido de box confirmado.
+  if S.pitRequested and not self._pitReq then
+    self._pitStopRequested = true
+    if ready(self, 'pitreq', 60, now) then
+      api.started('auto_pitreq')
+      api.say('mandatory_pit_stops', 'pit_stop_requested', 'Box pedido', {})
+      api.done()
+    end
+  elseif not S.pitRequested and not S.inPit then
+    self._pitStopRequested = false
   end
   self._pitReq = S.pitRequested
 
   -- ERS/bateria e push-to-pass (so em carro com ERS).
   if S.kersMax then
-    if S.kersPct and S.kersPct < 25 and ready(self, 'lowbatt', 240, now) then
-      api.started('auto_batt')
-      api.say('battery', 'low_battery', 'Bateria baixa', {})
-      api.done()
+    if S.kersPct and S.kersPct >= 15 then self._criticalBattLatched = false end
+    if S.kersPct and S.kersPct >= 35 then
+      self._lowBattLatched = false
+    end
+    if S.kersPct and S.kersPct < 10 and not self._criticalBattLatched then
+      self._criticalBattLatched = true
+      self._lowBattLatched = true
+      if ready(self, 'battcritical', 240, now) then
+        api.started('auto_battcritical', 85)
+        api.say('battery', 'critical_battery', 'Bateria crítica', { priority = true })
+        api.done()
+      end
+    elseif S.kersPct and S.kersPct < 25 and not self._lowBattLatched then
+      self._lowBattLatched = true
+      if ready(self, 'lowbatt', 240, now) then
+        api.started('auto_batt')
+        api.say('battery', 'low_battery', 'Bateria baixa', {})
+        api.done()
+      end
     end
     if S.p2p and S.p2p == 1 and self._p2p ~= 1 and ready(self, 'p2p1', 300, now) then
       api.started('auto_p2p')
@@ -558,31 +688,34 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
 
   -- Sem rastreio de setor (elogios automaticos removidos).
 
-  -- Posicao ganha/perdida (bandeira de ultrapassagem ao vivo).
+  -- Posicao ganha/perdida. Quando os comentarios locais estao ativos, eles ja
+  -- avaliam a mudanca ao fechar a volta e evitamos repetir a mesma informacao.
   if S.sessType == 3 and S.pos and S.pos >= 1 then
-    if self._lastPos and S.pos < self._lastPos and ready(self, 'gain', 25, now) then
-      local jumped = self._lastPos - S.pos
-      api.started('auto_gain')
-      if jumped >= 2 then
-        api.say('pearls_of_wisdom', 'keep_it_up', 'Duas de uma vez!', {})
-      elseif math.random() < 0.5 then
-        api.say('position', 'overtaking', 'Ultrapassagem!', {})
-      else
-        api.say('pearls_of_wisdom', 'keep_it_up', 'Ultrapassagem!', {})
-      end
-      api.done()
-    elseif self._lastPos and S.pos > self._lastPos then
-      self._lossCount = self._lossCount + 1
-      if ready(self, 'loss', 25, now) then
-        api.started('auto_loss')
-        api.say('position', 'being_overtaken', 'Perdeu posição', {})
+    if not C.raceCommentary then
+      if self._lastPos and S.pos < self._lastPos and ready(self, 'gain', 25, now) then
+        local jumped = self._lastPos - S.pos
+        api.started('auto_gain')
+        if jumped >= 2 then
+          api.say('pearls_of_wisdom', 'keep_it_up', 'Duas de uma vez!', {})
+        elseif math.random() < 0.5 then
+          api.say('position', 'overtaking', 'Ultrapassagem!', {})
+        else
+          api.say('pearls_of_wisdom', 'keep_it_up', 'Ultrapassagem!', {})
+        end
         api.done()
-      end
-      local level = tonumber(C.rantLevel) or 0
-      if not S.inPit and (S.speed or 0) > 30
-          and (level >= 3 or (level == 2 and self._lossCount % 2 == 0)
-            or (level == 1 and self._lossCount % 3 == 0)) then
-        planRant(self, 'loss', C, now)
+      elseif self._lastPos and S.pos > self._lastPos then
+        self._lossCount = self._lossCount + 1
+        if ready(self, 'loss', 25, now) then
+          api.started('auto_loss')
+          api.say('position', 'being_overtaken', 'Perdeu posição', {})
+          api.done()
+        end
+        local level = tonumber(C.rantLevel) or 0
+        if not S.inPit and (S.speed or 0) > 30
+            and (level >= 3 or (level == 2 and self._lossCount % 2 == 0)
+              or (level == 1 and self._lossCount % 3 == 0)) then
+          planRant(self, 'loss', C, now)
+        end
       end
     end
     self._lastPos = S.pos
@@ -608,6 +741,7 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
 
   -- Saida do box: transito ou pista livre (+ custo medido da parada).
   if self._wasInPit and not S.inPit then
+    self._pitStopRequested = false
     if ready(self, 'pitexit', 30, now) then
       api.started('auto_pitexit')
       if (nearby or 0) > 0 then
@@ -633,7 +767,11 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
       if sgPending then
         api.say('penalties', 'pit_now_stop_go', 'Cumprir stop&go', {})
       else
-        api.say('mandatory_pit_stops', 'box_in', 'No box', {})
+        if self._pitStopRequested then
+          api.say('mandatory_pit_stops', 'pit_crew_ready', 'Equipe pronta', {})
+        else
+          api.say('mandatory_pit_stops', 'box_in', 'No box', {})
+        end
       end
       if G.need and G.need > 0.1 then
         api.say('mandatory_pit_stops', 'will_put_fuel_in', 'Vamos abastecer', { noBeep = true })
@@ -730,7 +868,7 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     end
   end
 
-  -- Pressao dos pneus: desvio da referencia do inicio (+-3 psi).
+  -- Pressao dos pneus: escolhe apenas a roda com maior desvio por ciclo.
   if S.wheels[1] and S.wheels[1].psi then
     if not self._psiBase then
       self._psiBase = {}
@@ -742,40 +880,49 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
       if not complete then self._psiBase = nil end
     end
     if self._psiBase then
+      local worst, worstDiff = nil, 0
       for i = 1, 4 do
         local w, base = S.wheels[i], self._psiBase[i]
         if w and w.psi and base then
           local diff = w.psi - base
-          if diff >= 3 and ready(self, 'phi' .. i, 180, now) then
-            api.started('auto_psi')
-            api.say('tyre_monitor', PRESS_WHEEL[i] .. '_pressure_high', 'Pressão alta', {})
-            api.done()
-          elseif diff <= -3 and ready(self, 'plo' .. i, 180, now) then
-            api.started('auto_psi')
-            api.say('tyre_monitor', PRESS_WHEEL[i] .. '_pressure_low', 'Pressão baixa', {})
-            api.done()
+          if math.abs(diff) >= 3 and math.abs(diff) > math.abs(worstDiff) then
+            worst, worstDiff = i, diff
           end
+        end
+      end
+      if worst then
+        local high = worstDiff > 0
+        local id = (high and 'phi' or 'plo') .. worst
+        if tyreReady(self, id, 180, now, false) then
+          api.started('auto_psi')
+          api.say('tyre_monitor', PRESS_WHEEL[worst] .. (high and '_pressure_high' or '_pressure_low'),
+            high and 'Pressão alta' or 'Pressão baixa', {})
+          api.done()
         end
       end
     end
   end
-  -- Camber: diferenca interna x externa (5+ graus).
+  -- Camber: informa somente a maior diferenca interna x externa por ciclo.
   if S.wheels[1] and S.wheels[1].inner then
+    local worst, worstDiff = nil, 0
     for i = 1, 4 do
       local w = S.wheels[i]
       if w and w.inner and w.outer then
         local diff = w.inner - w.outer
-        if diff >= 5 and ready(self, 'cain' .. i, 240, now) then
-          api.started('auto_camber')
-          api.num(string.format('%.0f', diff))
-          api.say('tyre_monitor', 'celsius_hotter_than_outer', 'mais quente dentro', { noBeep = true })
-          api.done()
-        elseif diff <= -5 and ready(self, 'caout' .. i, 240, now) then
-          api.started('auto_camber')
-          api.num(string.format('%.0f', math.abs(diff)))
-          api.say('tyre_monitor', 'celsius_colder_than_outer', 'mais frio dentro', { noBeep = true })
-          api.done()
+        if math.abs(diff) >= 5 and math.abs(diff) > math.abs(worstDiff) then
+          worst, worstDiff = i, diff
         end
+      end
+    end
+    if worst then
+      local hotter = worstDiff > 0
+      local id = (hotter and 'cain' or 'caout') .. worst
+      if tyreReady(self, id, 240, now, false) then
+        api.started('auto_camber')
+        api.num(string.format('%.0f', math.abs(worstDiff)))
+        api.say('tyre_monitor', hotter and 'celsius_hotter_than_outer' or 'celsius_colder_than_outer',
+          hotter and 'mais quente dentro' or 'mais frio dentro', { noBeep = true })
+        api.done()
       end
     end
   end
@@ -850,16 +997,38 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     self._pressSince = nil
   end
 
-  -- Carro lento ou parado a frente (velocidade do rival via spline).
-  if gaps.aheadV and (S.speed or 0) > 60 and not S.inPit and not S.finished then
-    if gaps.aheadV < 12 and ready(self, 'stoppedcar', 120, now) then
-      api.started('auto_stopped')
-      api.say('flags', 'stopped_car_ahead', 'Carro parado!', { priority = true })
-      api.done()
-    elseif gaps.aheadV < (S.speed or 0) - 50 and ready(self, 'slowcar', 150, now) then
-      api.started('auto_slowcar')
-      api.say('flags', 'slow_car_ahead', 'Carro lento', {})
-      api.done()
+  -- Carro lento ou parado a frente: avisa uma vez por encontro e rearma apenas
+  -- depois de a diferenca de velocidade normalizar por alguns segundos.
+  local ownSpeed = S.speed or 0
+  local trackingAhead = gaps.aheadV ~= nil and not S.inPit and not S.finished
+  local slowState
+  if trackingAhead and ownSpeed > 60 then
+    if gaps.aheadV < 12 then slowState = 'stopped'
+    elseif gaps.aheadV < ownSpeed - 50 then slowState = 'slow' end
+  end
+  if slowState then
+    self._slowCarClearSince = nil
+    local escalated = slowState == 'stopped' and self._slowCarState == 'slow'
+    if not self._slowCarState or escalated then
+      self._slowCarState = slowState
+      if slowState == 'stopped' then
+        api.started('auto_stopped')
+        api.say('flags', 'stopped_car_ahead', 'Carro parado!', { priority = true })
+        api.done()
+      elseif ready(self, 'slowcar', 30, now) then
+        api.started('auto_slowcar')
+        api.say('flags', 'slow_car_ahead', 'Carro lento', {})
+        api.done()
+      end
+    end
+  else
+    local normalized = not trackingAhead
+      or (gaps.aheadV >= 25 and gaps.aheadV >= ownSpeed - 25)
+    if normalized then
+      self._slowCarClearSince = self._slowCarClearSince or now
+      if now - self._slowCarClearSince >= 3 then self._slowCarState = nil end
+    else
+      self._slowCarClearSince = nil
     end
   end
 
@@ -913,7 +1082,8 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
 
   local every = math.max(1, math.min(5, math.floor(tonumber(C.briefEvery) or 1)))
   -- Nos marcos de 5 voltas, usa o informe normal quando ele cair na mesma volta.
-  if calm and C.warnSummary and G.paceN and G.paceN >= 4 and G.paceN % 5 == 0
+  if calm and C.warnSummary and not C.raceCommentary
+      and G.paceN and G.paceN >= 4 and G.paceN % 5 == 0
       and G.paceN % every ~= 0 and once(self, 'pace' .. G.paceN) then
     api.started('auto_pace', 30)
     local trend = G.paceTrendMs or 0
@@ -1060,9 +1230,10 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
   local sample = G.paceN or 0
   if sample > self._briefSeen then
     self._briefSeen = sample
-    if C.warnSummary and not S.inPit and not S.finished
+    if C.warnSummary and not C.raceCommentary and not S.inPit and not S.finished
         and sample % every == 0 and G.lastMs and G.lastMs > 0 then
-      self._pendingBrief = { sample = sample, lapMs = G.lastMs, at = now }
+      self._pendingBrief = { sample = sample, lapMs = G.lastMs, at = now,
+        allGood = G.lastAllGood == true }
     end
   end
   local brief = self._pendingBrief
@@ -1080,12 +1251,14 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     end
     local total = brief.lapMs / 1000
     api.time(math.floor(total / 60), total % 60)
-    if brief.sample % 5 == 0 then
+    if brief.allGood then
+      api.say('lap_times', 'sector_all_fast', 'Bons tempos nos três setores', { noBeep = true })
+    elseif brief.sample % 5 == 0 then
       local trend = G.paceTrendMs or 0
       if trend < -150 then
         api.say('lap_times', 'improving', 'Ritmo melhorando', { noBeep = true })
       elseif trend > 150 then
-        api.say('lap_times', 'pace_bad', 'Ritmo piorando', { noBeep = true })
+        api.say('lap_times', 'worsening', 'Ritmo piorando', { noBeep = true })
       else
         api.say('lap_times', 'consistent', 'Ritmo consistente', { noBeep = true })
       end

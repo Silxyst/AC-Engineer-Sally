@@ -29,19 +29,25 @@ local function listWav(dir)
   return out
 end
 
--- Um clip aleatorio da frase (as tomadas variam a cada chamada).
-function Sally:clip(category, phrase)
+function Sally:hasClip(category, phrase)
   category, phrase = tostring(category or ''), tostring(phrase or '')
-  if category == '' or phrase == '' then return nil end
-  if category:find('%.%.', 1, true) or phrase:find('%.%.', 1, true) then return nil end
+  if category == '' or phrase == '' then return false end
+  if category:find('%.%.', 1, true) or phrase:find('%.%.', 1, true) then return false end
   local key = category .. '/' .. phrase
   local cached = self.cache[key]
-  if cached == false then return nil end
+  if cached == false then return false end
   if type(cached) ~= 'table' then
     cached = listWav(self.root .. '/' .. key)
-    if #cached == 0 then self.cache[key] = false; return nil end
+    if #cached == 0 then self.cache[key] = false; return false end
     self.cache[key] = cached
   end
+  return #cached > 0
+end
+
+-- Um clip aleatorio da frase (as tomadas variam a cada chamada).
+function Sally:clip(category, phrase)
+  if not self:hasClip(category, phrase) then return nil end
+  local cached = self.cache[tostring(category) .. '/' .. tostring(phrase)]
   return cached[math.random(1, #cached)]
 end
 

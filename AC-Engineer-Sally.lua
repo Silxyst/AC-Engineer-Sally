@@ -1,6 +1,6 @@
 -- AC Engineer Sally: engenheira + spotter 100% voz Sally (clips gravados).
--- Sem TTS, sem reconhecimento de voz, sem internet, sem mp3 antigo.
--- Relatorios por botoes + avisos automaticos com cooldown.
+-- Voz Sally gravada e comentarios escolhidos por regras locais de telemetria.
+-- Alertas e comentarios funcionam sem internet e sem servicos externos.
 
 local Sally = require 'sally'
 local Voice = require 'voice'
@@ -11,8 +11,11 @@ local Warn = require 'warn'
 local Rep = require 'rep'
 local UI = require 'ui'
 local Lang = require 'lang'
+local Avatar = require 'avatar'
+local Coach = require 'coach'
 
 local root = ac.getFolder(ac.FolderID.ScriptOrigin)
+local avatarFrames = Avatar.load(root)
 
 ------------------------------------------------------------
 -- Config
@@ -48,7 +51,7 @@ local C = {
   warnFlags = true, warnFuel = true, warnTyres = true, warnDamage = true,
   warnSummary = true, briefEvery = 1, fuelStatusSeconds = 90, rantLevel = 0,
   tyCold = 0, tyHot = 0, reserve = 1.0,
-  voiceOn = true, radioOn = true,
+  voiceOn = true, radioOn = true, showAvatar = true, raceCommentary = true,
   accR = 0.86, accG = 0.12, accB = 0.12,
   language = 'pt-BR',
 }
@@ -107,6 +110,8 @@ do
             math.floor(tonumber(v) or C.fuelStatusSeconds)))
         elseif k == 'RANTS' then
           C.rantLevel = math.max(0, math.min(3, math.floor(tonumber(v) or C.rantLevel)))
+        elseif k == 'SHOW_AVATAR' then C.showAvatar = v == '1'
+        elseif k == 'RACE_COMMENTARY' then C.raceCommentary = v == '1'
         elseif k == 'LANGUAGE' then
           if v == 'en-US' or v == 'pt-BR' then C.language = v end
         end
@@ -116,6 +121,64 @@ do
   end
 end
 L:set(C.language)
+
+local clock = 0
+local rpCutWarnings, rpWarningVersion = nil, 0
+local rpChatSubscription
+if ac and type(ac.onChatMessage) == 'function' then
+  local ok, subscription = pcall(ac.onChatMessage, function(message, senderCarIndex)
+    if senderCarIndex == 0 then
+      local count, total = tostring(message or ''):lower():match(
+        '^%s*rp:cutting warnings:%s*(%d+)%s*/%s*(%d+)%s*$')
+      count, total = tonumber(count), tonumber(total)
+      if count and total and count >= 1 and total >= 1 and count <= total and total <= 20 then
+        rpWarningVersion = rpWarningVersion + 1
+        rpCutWarnings = { count = count, total = total, version = rpWarningVersion }
+      end
+    end
+    return false
+  end)
+  if ok then
+    rpChatSubscription = subscription
+    script.rpChatSubscription = subscription
+  end
+end
+local lastCoachAt, lastCoachPhrase, coachLapPosition, coachPreviousLapMs = -1e9, nil, nil, nil
+local pendingCoach, sessionStartedAt = nil, 0
+local lastNoncriticalAt, lastSpotterAt, budgetGroup = -1e9, -1e9, nil
+local diagnosticsInitialized = false
+
+local function coachLog(event, phrase, reason, lap, telemetry)
+  local function field(value)
+    local s = tostring(value or ''):gsub('[\r\n]', ' '):gsub('"', '""')
+    return '"' .. s .. '"'
+  end
+  local ok, file = pcall(io.open, root .. '/sally_diagnostics.csv', 'a')
+  if not ok or not file then return end
+  if not diagnosticsInitialized then
+    local readOK, exists = pcall(io.open, root .. '/sally_diagnostics.csv', 'r')
+    local hasData = false
+    if readOK and exists then
+      local size = exists:seek('end')
+      hasData = size ~= nil and size > 0
+      exists:close()
+    end
+    if not hasData then
+      pcall(function()
+        file:write('sim_time,event,lap,phrase,reason,last_ms,best_ms,previous_ms,position,previous_position\n')
+      end)
+    end
+    diagnosticsInitialized = true
+  end
+  telemetry = telemetry or {}
+  pcall(function()
+    file:write(string.format('%.2f,%s,%s,%s,%s,%s,%s,%s,%s,%s\n', clock,
+      field(event), field(lap), field(phrase), field(reason), field(telemetry.lastMs),
+      field(telemetry.bestMs), field(telemetry.previousMs), field(telemetry.position),
+      field(telemetry.previousPosition)))
+    file:close()
+  end)
+end
 
 local dirty, dirtyTimer = false, 0
 local function save()
@@ -138,6 +201,8 @@ local function save()
   file:write('BRIEF_EVERY = ' .. tostring(C.briefEvery) .. '\n')
   file:write('FUEL_STATUS_SECONDS = ' .. tostring(C.fuelStatusSeconds) .. '\n')
   file:write('RANTS = ' .. tostring(C.rantLevel) .. '\n')
+  file:write('SHOW_AVATAR = ' .. (C.showAvatar and '1' or '0') .. '\n')
+  file:write('RACE_COMMENTARY = ' .. (C.raceCommentary and '1' or '0') .. '\n')
   file:write('LANGUAGE = ' .. tostring(C.language) .. '\n')
   file:close()
 end
@@ -166,17 +231,27 @@ local spotOpts = Spot.defaults()
 local spotSt = Spot.newState()
 
 local history = {}
-local cap = { text = '', speaker = 'SALLY', alpha = 0, target = 0, fade = 0 }
-V.onCaption = function(text, speaker)
+local cap = { text = '', speaker = 'SALLY', alpha = 0, target = 0, fade = 0,
+  expression = 'neutral', group = nil }
+V.onCaption = function(text, speaker, entry)
   history[#history + 1] = { text = text, speaker = speaker }
   while #history > 30 do table.remove(history, 1) end
   cap.text, cap.speaker = L:cap(text) or '', speaker or 'SALLY'
+  local expression = Avatar.expressionFor(entry)
+  if entry and entry.group ~= nil then
+    if cap.group ~= entry.group then
+      cap.group, cap.expression = entry.group, expression
+    elseif cap.expression == 'neutral' and expression ~= 'neutral' then
+      cap.expression = expression
+    end
+  else
+    cap.group, cap.expression = nil, expression
+  end
   cap.target = 1
   cap.fade = 0
 end
 V.onIdle = function() cap.fade = 1.6 end
 
-local clock = 0
 local dashMsg, dashUntil = nil, 0
 local lastS, lastG = nil, nil
 local lastToken, lastLap = nil, -1
@@ -188,7 +263,8 @@ local function queueHit(withCar, previous)
   if hitPending then return end
   hitPending = { at = clock, withCar = withCar,
     preDamage = previous and previous.dmgTotal or nil,
-    preSpeed = previous and previous.speed or nil }
+    preSpeed = previous and previous.speed or nil,
+    preEngineLife = previous and previous.engLife or nil }
 end
 -- O callback do CSP captura contatos que podem durar apenas poucos frames.
 if ac.onCarCollision then
@@ -210,6 +286,7 @@ local function message(t)
   -- Espelha na caixinha do radio quando ela esta livre.
   if not V:isBusy() then
     cap.text, cap.speaker = L:cap(tostring(t or '')), 'SALLY'
+    cap.expression, cap.group = 'neutral', nil
     cap.target = 1
     cap.fade = 3
   end
@@ -217,8 +294,17 @@ end
 
 V.gate = function(entry)
   if not C.voiceOn or not C.radioOn then return false end
-  if (entry.priorityValue or 20) >= 50 then return true end
-  return lastS and Tele.isCalm(lastS) or false
+  local priority = tonumber(entry.priorityValue) or 20
+  if priority >= 70 then return true end
+  if clock - sessionStartedAt < 25 or clock - lastSpotterAt < 2 then return false end
+  if not lastS or not Tele.isCalm(lastS) then return false end
+  if entry.group and entry.group == budgetGroup then return true end
+  if clock - lastNoncriticalAt < 25 then return false end
+  budgetGroup = entry.group
+  return true
+end
+V.onEntryStart = function(entry)
+  if (tonumber(entry.priorityValue) or 20) < 70 then lastNoncriticalAt = clock end
 end
 
 ------------------------------------------------------------
@@ -246,6 +332,7 @@ local function spotSay(line, test)
   local clear = line == 'clear_left' or line == 'clear_right' or line == 'all_clear'
   V:interruptWith(path, SPOT_CAP[line] or line, 'SPOTTER',
     C.spotVol * C.master, clear, { group = 'spotter', ttl = 2, key = line })
+  lastSpotterAt = clock
   return true
 end
 
@@ -294,6 +381,68 @@ function A.spotSeq()
   if not spotSeq.running then V:clear() end
 end
 function A.clearQueue() V:clear() end
+local function maybeCoachCommentary(S, previousLapMs, previousLapPosition, lapCompleted,
+    allSectorsGood, paceTrendMs)
+  local supportedSession = S.sessType == 1 or S.sessType == 2 or S.sessType == 3
+  if lapCompleted and not pendingCoach and C.raceCommentary and C.radioOn and C.voiceOn
+      and not mutedReplay and supportedSession and S.lastValid == true then
+    local selected = Coach.select(sally, S, previousLapMs, previousLapPosition,
+      allSectorsGood, paceTrendMs)
+    if selected then
+      pendingCoach = { selected = selected, lap = S.lap or 0,
+        expiresAt = clock + 25, queued = false,
+        telemetry = { lastMs = S.lastMs, bestMs = S.bestMs,
+          previousMs = previousLapMs, position = S.pos,
+          previousPosition = previousLapPosition } }
+      coachLog('selected', selected.phrase, selected.category, S.lap, pendingCoach.telemetry)
+    end
+  end
+
+  local pending = pendingCoach
+  if not pending then return end
+  if clock >= pending.expiresAt then
+    coachLog('expired', pending.selected.phrase, 'retry_window', pending.lap, pending.telemetry)
+    pendingCoach = nil
+    return
+  end
+  if not C.raceCommentary or not C.radioOn or not C.voiceOn or mutedReplay
+      or S.inPit or S.finished or not supportedSession then return end
+  if pending.queued or clock - lastCoachAt < 20 or V:isBusy()
+      or V:isBusyAtOrAbove(70) or clock - lastSpotterAt < 2
+      or clock - sessionStartedAt < 25 or not Tele.isCalm(S) then return end
+
+  local selected = pending.selected
+  local path = sally:clip(selected.category, selected.phrase)
+  if not path then
+    coachLog('missing_clip', selected.phrase, selected.category, pending.lap, pending.telemetry)
+    pendingCoach = nil
+    return
+  end
+  local caption = L:cap(selected.transcript) or selected.transcript
+  pending.queued = true
+  local queued = V:enqueue(path, caption, 'SALLY', {
+    vol = C.engVol * C.master, group = 'coach:' .. tostring(pending.lap),
+    ttl = math.max(0.1, pending.expiresAt - clock), priorityValue = 30,
+    key = selected.category .. '/' .. selected.phrase,
+    onOutcome = function(state, reason)
+      if state == 'started' then
+        lastCoachAt, lastCoachPhrase = clock, selected.phrase
+        coachLog('started', selected.phrase, selected.category, pending.lap, pending.telemetry)
+        if pendingCoach == pending then pendingCoach = nil end
+      elseif state == 'finished' then
+        coachLog('finished', selected.phrase, selected.category, pending.lap, pending.telemetry)
+      else
+        coachLog(state, selected.phrase, reason, pending.lap, pending.telemetry)
+        pending.queued = false
+        if state == 'dropped' and reason == 'expired' and pendingCoach == pending then
+          pendingCoach = nil
+        end
+      end
+    end,
+  })
+  if queued then coachLog('queued', selected.phrase, selected.category, pending.lap, pending.telemetry)
+  else pending.queued = false end
+end
 function A.catalog(cat, phrase)
   -- Teste: fura a pausa do radio (mas respeita replay e voz desligada).
   if mutedReplay or not C.voiceOn or not sally:available() then return end
@@ -325,16 +474,21 @@ function A.save() markDirty() end
 -- Loop
 ------------------------------------------------------------
 local function resetAll(reason)
+  rpCutWarnings, rpWarningVersion = nil, 0
   strat:reset(C.reserve)
   warner:reset()
   spotSt = Spot.newState()
   history = {}
   V:clear()
   cap.text, cap.speaker = '', 'SALLY'
+  cap.expression, cap.group = 'neutral', nil
   cap.alpha, cap.target, cap.fade = 0, 0, 0
   lastLap = -1
   prevInPit = false
   hitPending, lastCollisionWith, lastHitInfo = nil, -1, nil
+  pendingCoach = nil
+  lastCoachAt, lastCoachPhrase, coachLapPosition, coachPreviousLapMs = -1e9, nil, nil, nil
+  sessionStartedAt, lastNoncriticalAt, lastSpotterAt, budgetGroup = clock, -1e9, -1e9, nil
 end
 
 function script.update(dt) updateApp(dt) end
@@ -350,6 +504,7 @@ function updateApp(dt)
       hitPending, lastCollisionWith = nil, -1
       V:clear()
       cap.text, cap.speaker = '', 'SALLY'
+      cap.expression, cap.group = 'neutral', nil
       cap.alpha, cap.target, cap.fade = 0, 0, 0
       spotSt = Spot.newState()
     end
@@ -380,24 +535,38 @@ function updateApp(dt)
     S.hit = { withCar = hitPending.withCar,
       damageDelta = math.max(0, (S.dmgTotal or 0) - (hitPending.preDamage or S.dmgTotal or 0)),
       speedDrop = math.max(0, (hitPending.preSpeed or S.speed or 0) - (S.speed or 0)),
-      impactSpeed = hitPending.preSpeed or S.speed or 0 }
+      impactSpeed = hitPending.preSpeed or S.speed or 0,
+      engineLost = hitPending.preEngineLife ~= nil and hitPending.preEngineLife > 0
+        and S.engLife ~= nil and S.engLife <= 0 }
     lastHitInfo = { at = clock, data = S.hit }
     hitPending = nil
   end
 
   -- Troca de sessao: reset total. Volta para tras: reset leve.
   local token = Tele.token(S)
-  if lastToken ~= nil and token ~= lastToken then
+  if lastToken == nil then
+    sessionStartedAt = clock
+  elseif token ~= lastToken then
     resetAll('session')
     S.hit = nil
-  elseif lastLap >= 0 and (S.lap or 0) < lastLap - 1 then
+  elseif lastLap >= 0 and (S.lap or 0) < lastLap then
     resetAll('restart')
     S.hit = nil
   end
   lastToken = token
+  S.rpCutWarnings = rpCutWarnings
+
+  local lapCompleted = lastLap >= 0 and (S.lap or 0) > lastLap
+  if coachLapPosition == nil then coachLapPosition = S.pos end
+  local previousLapPosition, previousLapMs
+  if lapCompleted then
+    previousLapPosition, coachLapPosition = coachLapPosition, S.pos
+    previousLapMs = coachPreviousLapMs
+    if S.lastValid == true and S.lastMs then coachPreviousLapMs = S.lastMs end
+  end
 
   -- Fecha volta antes de rastrear setores da nova.
-  if lastLap >= 0 and (S.lap or 0) > lastLap then strat:closeLap(S) end
+  if lapCompleted then strat:closeLap(S) end
   if prevInPit and not S.inPit then strat:pitExit(S.lap or 0) end
   prevInPit = S.inPit
   lastLap = S.lap or 0
@@ -433,6 +602,8 @@ function updateApp(dt)
     warner:update(dt, S, G, rep.api, C, clock, gapCache, Tele.isCalm(S),
       spotSt.nearby or 0, (spotSt.left or 0) > 0 or (spotSt.right or 0) > 0)
   end
+  maybeCoachCommentary(S, previousLapMs, previousLapPosition, lapCompleted,
+    G.lastAllGood, G.paceTrendMs)
 
   -- Sequencia de teste do spotter.
   if spotSeq.running then
@@ -464,13 +635,20 @@ end
 ------------------------------------------------------------
 function script.windowMain(dt) windowMain(dt) end
 function windowMain(dt)
-  UI.box({ text = cap.text, speaker = cap.speaker, alpha = cap.alpha }, C)
+  local playing = V.playing and V.playing.entry
+  local frames = avatarFrames and (avatarFrames[cap.expression] or avatarFrames.neutral)
+  UI.box({ text = cap.text, speaker = cap.speaker, alpha = cap.alpha,
+    talking = playing ~= nil and not playing.isBeep and playing.speaker == 'SALLY',
+    animationTime = clock, avatarIdle = frames and frames.idle,
+    avatarTalking = frames and frames.talking },
+    C, spotSt, L)
 end
 
 function script.windowDashboard(dt) windowDashboard(dt) end
 function windowDashboard(dt)
   local msg = clock < dashUntil and dashMsg or nil
-  UI.dash(lastS or {}, lastG or strat.state, spotSt, C, A, history, msg, L)
+  UI.dash(lastS or {}, lastG or strat.state, spotSt, C, A, history, msg, L,
+    { hit = lastHitInfo, now = clock })
 end
 
 function script.windowMainSettings(dt) windowMainSettings(dt) end
@@ -484,5 +662,5 @@ function windowMainSettings(dt)
     countsCache = { phrases = phrases }
   end
   UI.settings(C, A, sally, V, spotSt, countsCache,
-    { S = lastS, G = lastG, hit = lastHitInfo, now = clock }, L)
+    { S = lastS, G = lastG, hit = lastHitInfo, now = clock }, L, avatarFrames)
 end

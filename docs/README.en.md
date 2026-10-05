@@ -31,8 +31,9 @@ Prerecorded voice, live telemetry, and a dedicated race hub.</p>
 | **Race awareness** | Flags, positions, gaps, pit entry/exit, session clock and simulator-reported penalties. |
 | **Race hub** | Fuel, range, remaining laps, last/best lap, tyres, spotter status and radio history. |
 | **Local audio** | English Sally voice clips, PT-BR/English interface and captions, independent volumes and playback settings. |
+| **Telemetry commentary** | Local rules select existing Sally recordings after valid laps in practice, qualifying or race, using pace and position; no internet or API key is needed. |
 
-The pack includes **25 categories and 5,952 Sally WAVs**, stored with Git LFS. Radio playback uses priorities, cooldowns and message expiry. Weather, DRS, ERS and push-to-pass calls depend on available telemetry.
+The pack includes **25 categories and 6,222 Sally WAVs**, stored with Git LFS. Radio playback uses priorities, cooldowns and message expiry. Weather, DRS, ERS and push-to-pass calls depend on available telemetry.
 
 <a id="install"></a>
 ## 📥 Installation
@@ -76,6 +77,7 @@ Keep the directory name **`AC-Engineer-Sally`** and entry filename **`AC-Enginee
 - Summary frequency, fuel-status interval and fuel reserve in laps.
 - Radio check, spotter tests, call sequence, queue clearing and phrase catalog.
 - Optional Rants level `0–3`; distributed defaults use `0` (off). Some clips in the pack contain explicit language.
+- Local telemetry commentary: selects existing recordings after valid laps based on pace and position. No online AI, API key or internet connection is used.
 
 `config.ini` supplies defaults. Changes made in the app are saved locally to `user_settings.ini`, which overrides defaults and is excluded from Git.
 
@@ -97,7 +99,7 @@ Sally's prerecorded voice is <strong>English</strong>. The language selector cha
 <details>
 <summary><strong>Does it require internet while driving?</strong></summary>
 <br>
-Once downloaded, the app runs offline using simulator telemetry and local files.
+The radio, alerts and telemetry commentary run locally and work without an internet connection or API key.
 </details>
 
 <details>
