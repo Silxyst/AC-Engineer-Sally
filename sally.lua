@@ -134,8 +134,9 @@ function Sally:transcript(category, phrase)
   local path = self.root .. '/' .. tostring(category) .. '/' .. tostring(phrase) .. '/subtitles.csv'
   local ok, file = pcall(io.open, path, 'r')
   if not ok or not file then return nil end
-  local line = file:read('*l')
-  file:close()
+  local readOk, line = pcall(function() return file:read('*l') end)
+  pcall(function() file:close() end)
+  if not readOk then return nil end
   if not line then return nil end
   local text = line:match('^[^,]+,(.+)$') or ''
   text = text:gsub('^%s*"', ''):gsub('"%s*$', '')

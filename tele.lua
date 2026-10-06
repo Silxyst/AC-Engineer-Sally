@@ -206,6 +206,10 @@ function Tele.snap()
   if S.rain and (S.rain < 0 or S.rain > 1) then S.rain = nil end
   S.wind = number(safe(function() return sim.windSpeedKmh end))
   S.flag = safe(function() return sim.raceFlagType end)
+  -- ReturnToPits e um fallback sem identificacao do tipo de penalidade.
+  S.returnToPits = safe(function()
+    return ac and ac.FlagType and sim.raceFlagType == ac.FlagType.ReturnToPits
+  end) == true
   S.sessType = number(safe(function() return sim.raceSessionType end))
     or number(safe(function() return sim.sessionType end))
   S.started = safe(function() return sim.isSessionStarted end) == true

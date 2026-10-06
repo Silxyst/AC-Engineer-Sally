@@ -19,8 +19,7 @@ function Warn:reset()
   self._engBase, self._wasHot, self._blankets = nil, nil, nil
   self._briefSeen, self._pendingBrief = 0, nil
   self._penaltyType, self._penaltySince = nil, nil
-  self._stopGoPending = false
-  self._rpCutVersion, self._rpCutCount, self._rpCutTotal, self._lastRPCutAt = 0, 0, nil, nil
+  self._penaltyActive, self._pitWaitPending = false, false
   self._nextFuelStatus, self._pendingRant = nil, nil
   self._t0, self._gridPos, self._wasBattle = nil, nil, false
   self._spins, self._gapT, self._gapPrevA, self._gapPrevB = 0, 0, nil, nil
@@ -164,35 +163,8 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
   -- estrategia (por exemplo, push e DRS) durante a volta de retorno.
   if S.finished or self.once.finish then return end
 
-  -- RP publica o contador de cortes no chat. Fala apenas quando o contador
-  -- local do jogador realmente avanca; deixa a mensagem visivel no chat.
-  local rpCuts = S.rpCutWarnings
-  if S.sessType == 3 and rpCuts and rpCuts.version ~= self._rpCutVersion then
-    self._rpCutVersion = rpCuts.version
-    local count, total = tonumber(rpCuts.count), tonumber(rpCuts.total)
-    if count and total and count >= 1 and count <= total then
-      if total ~= self._rpCutTotal or count < self._rpCutCount then
-        self._rpCutCount, self._rpCutTotal = 0, total
-      end
-      if count > self._rpCutCount then
-        self._rpCutCount, self._lastRPCutAt = count, now
-        local phrase = count == 1 and 'cut_track_race_1'
-          or count == 2 and 'cut_track_race_2'
-          or count == 3 and 'cut_track_race_3'
-          or (C.rantLevel or 0) >= 3 and 'cut_track_race_4'
-          or 'cut_track_race_3'
-        if count >= total or ready(self, 'rp_cut_warning', 15, now) then
-          api.started('auto_rp_cut_warning', 80)
-          api.say('penalties', phrase,
-            string.format('Aviso RealPenalty: corte %d/%d', count, total), { priority = true })
-          api.done()
-        end
-      end
-    end
-  end
-
   -- Bandeiras.
-  if C.warnFlags and ac.FlagType then
+  if C.warnFlags and ac and ac.FlagType then
     local flag = S.flag
     if flag == ac.FlagType.Caution then
       if S.lap ~= self._yellowLap then
@@ -208,8 +180,7 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
         api.say('flags', 'blue_flag', 'Bandeira azul', { priority = true })
         api.done()
       end
-    elseif (flag == ac.FlagType.Stop or flag == ac.FlagType.ReturnToPits)
-        and S.penaltyType ~= 4 then
+    elseif flag == ac.FlagType.Stop and S.penaltyType ~= 4 then
       if ready(self, 'black', 60, now) then
         api.started('auto_flag')
         api.say('flags', 'black_flag', 'Bandeira preta', { priority = true })
@@ -235,87 +206,81 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     end
   end
 
-  -- Penalidade real do carro do jogador. Nao deduz tipo apenas pela bandeira.
-  if S.penaltyType ~= nil then
-    local stopGoSeconds = tonumber(S.penaltyParameter)
-    if S.penaltyType == 2 and stopGoSeconds and stopGoSeconds > 0 and stopGoSeconds <= 120 then
-      self._stopGoPending = true
-    end
-    local current, previous = S.penaltyType, self._penaltyType
-    if current ~= previous then
-      self._penaltyType = current
-      if current > 0 and current ~= 5 then
-        self._penaltySince = now
-        api.started('auto_penalty', 90)
-        local param = S.penaltyParameter
-        if current == 3 then
-          api.say('penalties', 'new_penalty_slowdown', 'Penalidade: reduza', {})
-          if param and param > 0 then
-            api.num(param)
-            api.say('timings', 'seconds', 'segundos', { noBeep = true })
-          end
-        elseif current == 4 then
-          if (S.dmgTotal or 0) > 30 then
-            api.say('penalties', 'meatball_flag', 'Bandeira laranja', {})
-          else
-            api.say('penalties', 'new_penalty_black_flag', 'Bandeira preta', {})
-          end
-        elseif current == 2 then
-          -- CSP descreve o tipo 2 como espera nos boxes com controles bloqueados;
-          -- tratamos a janela curta como RP Stop & Go quando o servidor a expõe.
-          local sgSecs = param and param > 0 and param <= 120 and param or nil
-          if sgSecs then
-            api.say('penalties', 'new_penalty_stopgo', 'Stop & Go', {})
-          elseif S.inPit then
-            api.say('penalties', 'drive_through_speeding_in_pit_lane', 'Excesso no box', {})
-          elseif self._t0 and now - self._t0 < 30 and (S.lap or 0) == 0 then
-            api.say('penalties', 'drive_through_false_start', 'Queima de largada', {})
-          elseif self._lastBlueT and now - self._lastBlueT < 60 then
-            api.say('penalties', 'drive_through_ignored_blue', 'Ignorou azul', {})
-          else
-            api.say('penalties', 'new_penalty_drivethrough', 'Drive-through', {})
-          end
-          if param and param > 0 then
-            api.num(param)
-            api.say('timings', 'seconds', 'segundos', { noBeep = true })
-          end
-        elseif current == 1 then
-          api.say('penalties', 'you_have_a_penalty', 'Parada obrigatória', {})
-          if param and param > 0 then
-            api.num(param)
-            api.say('race_time', 'laps_remaining', 'voltas', { noBeep = true })
-          end
-        else
-          api.say('penalties', 'you_have_a_penalty', 'Voce tem penalidade', {})
-        end
-        api.done()
-        if (C.rantLevel or 0) >= 2 or current == 4 then
-          planRant(self, 'penalty', C, now)
-        end
-      elseif (current == 0 or current == 5) and previous and previous > 0 and previous ~= 5 then
-        self._penaltySince = nil
-        api.started('auto_penalty_served')
-        if self._stopGoPending then
-          api.say('mandatory_pit_stops', 'stop_complete_go', 'Stop & Go cumprido', { priority = true })
-          self._stopGoPending = false
-        else
-          api.say('penalties', 'penalty_served', 'Penalidade cumprida', {})
-        end
-        api.done()
+  -- O tipo de penalidade do CSP e autoritativo quando disponivel. A bandeira
+  -- ReturnToPits nao identifica o tipo e serve apenas como fallback.
+  local current, previous = S.penaltyType, self._penaltyType
+  local nativeActive = current ~= nil and current > 0 and current ~= 5
+  local returnToPits = S.returnToPits == true
+  local returnToPitsOnly = returnToPits and not nativeActive
+  local active = nativeActive or returnToPitsOnly
+  local wasActive = self._penaltyActive == true
+  local typeChanged = current ~= nil and current ~= previous
+  if current ~= nil then self._penaltyType = current end
+
+  if current == 2 then self._pitWaitPending = true end
+
+  if active and (not wasActive or (nativeActive and typeChanged and previous
+      and previous > 0 and previous ~= 5)) then
+    self._penaltyActive = true
+    self._penaltySince = now
+    api.started('auto_penalty', 90)
+    local param = S.penaltyParameter
+    if not nativeActive then
+      api.say('penalties', 'you_have_a_penalty', 'Retorne aos boxes para cumprir a penalidade', {})
+    elseif current == 3 then
+      api.say('penalties', 'new_penalty_slowdown', 'Penalidade: reduza', {})
+      if param and param > 0 then
+        api.num(param)
+        api.say('timings', 'seconds', 'segundos', { noBeep = true })
       end
-    end
-    if current > 0 and current ~= 5 and self._penaltySince
-        and now - self._penaltySince > 75 and ready(self, 'penalty_reminder', 90, now) then
-      api.started('auto_penalty_reminder')
-      local sgPending = current == 2 and S.penaltyParameter and S.penaltyParameter > 0
-        and S.penaltyParameter <= 120
-      if sgPending then
-        api.say('penalties', 'still_have_to_serve_stop_go', 'Stop&go pendente', {})
-      else
-        api.say('penalties', 'you_still_have_a_penalty', 'Penalidade pendente', {})
+    elseif current == 4 then
+      api.say('penalties', 'new_penalty_black_flag', 'Bandeira preta', {})
+    elseif current == 2 then
+      api.say('penalties', 'you_have_a_penalty', 'Aguarde nos boxes', {})
+      if param and param > 0 then
+        api.num(param)
+        api.say('timings', 'seconds', 'segundos', { noBeep = true })
       end
-      api.done()
+    elseif current == 1 then
+      api.say('penalties', 'you_have_a_penalty', 'Parada obrigatória', {})
+      if param and param > 0 then
+        api.num(param)
+        api.say('race_time', 'laps_remaining', 'voltas', { noBeep = true })
+      end
+    else
+      api.say('penalties', 'you_have_a_penalty', 'Voce tem penalidade', {})
     end
+    api.done()
+    if (C.rantLevel or 0) >= 2 or current == 4 then
+      planRant(self, 'penalty', C, now)
+    end
+  elseif not active and wasActive then
+    self._penaltyActive = false
+    self._penaltySince = nil
+    api.started('auto_penalty_served')
+    if self._pitWaitPending then
+      api.say('penalties', 'penalty_served', 'Penalidade cumprida', { priority = true })
+      self._pitWaitPending = false
+    else
+      api.say('penalties', 'penalty_served', 'Penalidade cumprida', {})
+    end
+    api.done()
+  else
+    self._penaltyActive = active
+  end
+
+  if active and self._penaltySince
+      and now - self._penaltySince > 75 and ready(self, 'penalty_reminder', 90, now) then
+    api.started('auto_penalty_reminder')
+    local pitWaitPending = nativeActive and current == 2
+    if pitWaitPending then
+      api.say('penalties', 'you_still_have_a_penalty', 'Aguarde nos boxes para cumprir a penalidade', {})
+    elseif returnToPitsOnly then
+      api.say('penalties', 'you_still_have_a_penalty', 'Retorne aos boxes para cumprir a penalidade', {})
+    else
+      api.say('penalties', 'you_still_have_a_penalty', 'Penalidade pendente', {})
+    end
+    api.done()
   end
 
   -- Combustivel.
@@ -634,7 +599,7 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
         self._pitServiceClearSince = self._pitServiceClearSince or now
         if now - self._pitServiceClearSince >= 1.0 and ready(self, 'pitcomplete', 30, now) then
           self._pitServiceStarted, self._pitServiceCompleteCalled = false, true
-          if not self._stopGoPending then
+          if not self._pitWaitPending then
             api.started('auto_pitcomplete', 60)
             api.say('mandatory_pit_stops', 'stop_complete_go', 'Parada concluída, pode sair', { priority = true })
             api.done()
@@ -722,7 +687,8 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
   end
 
   -- Rodada/parada (qualquer volta, inclusive a 1a: sem gate de volta).
-  if S.speed < 2 and not S.inPit and not S.finished then
+  local speed = tonumber(S.speed)
+  if speed and speed < 2 and not S.inPit and not S.finished then
     self._spinSince = self._spinSince or now
     if now - self._spinSince > 4 and ready(self, 'stall', 180, now) then
       self._spins = (self._spins or 0) + 1
@@ -762,10 +728,9 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
     self._pitEnterT = now
     if ready(self, 'pitenter', 60, now) then
       api.started('auto_pitenter')
-      local sgPending = S.penaltyType == 2 and S.penaltyParameter and S.penaltyParameter > 0
-        and S.penaltyParameter <= 120
-      if sgPending then
-        api.say('penalties', 'pit_now_stop_go', 'Cumprir stop&go', {})
+      local pitWaitPending = S.penaltyType == 2
+      if pitWaitPending then
+        api.say('penalties', 'you_have_a_penalty', 'Aguarde nos boxes', {})
       else
         if self._pitStopRequested then
           api.say('mandatory_pit_stops', 'pit_crew_ready', 'Equipe pronta', {})
@@ -930,13 +895,15 @@ function Warn:update(dt, S, G, api, C, now, gaps, calm, nearby, overlap)
   self._oppT = self._oppT or 0
   if S.sessType == 3 and S.pos and S.pos >= 1 and now - self._oppT >= 1 then
     self._oppT = now
-    local sim = ac.getSim and ac.getSim() or nil
+    local sim
+    pcall(function() if ac and ac.getSim then sim = ac.getSim() end end)
     if sim then
       local n = tonumber(sim.carsCount) or 1
       for _, d in ipairs({ { -1, 'ahead' }, { 1, 'behind' } }) do
         local found, inPit, rlap = false, false, nil
         for i = 0, n - 1 do
-          local okC, c = pcall(ac.getCar, i)
+          local okC, c = false, nil
+          if ac and ac.getCar then okC, c = pcall(ac.getCar, i) end
           if okC and c then
             local okP, pos = pcall(function() return c.racePosition end)
             if okP and pos == S.pos + d[1] then

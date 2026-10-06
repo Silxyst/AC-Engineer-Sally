@@ -14,7 +14,11 @@ local Lang = require 'lang'
 local Avatar = require 'avatar'
 local Coach = require 'coach'
 
-local root = ac.getFolder(ac.FolderID.ScriptOrigin)
+local root
+pcall(function()
+  if ac and ac.getFolder and ac.FolderID then root = ac.getFolder(ac.FolderID.ScriptOrigin) end
+end)
+root = type(root) == 'string' and root or ''
 local avatarFrames = Avatar.load(root)
 
 ------------------------------------------------------------
@@ -84,65 +88,47 @@ local settingsPath = root .. '/user_settings.ini'
 do
   local ok, file = pcall(io.open, settingsPath, 'r')
   if ok and file then
-    local section
-    for line in file:lines() do
-      local s = line:match('^%s*%[(.-)%]%s*$')
-      if s then section = s end
-      local k, v = line:match('^%s*([%w_]+)%s*=%s*(.-)%s*$')
-      if k and section == 'SALLY' then
-        if k == 'ENGINEER_VOLUME' then C.engVol = tonumber(v) or C.engVol
-        elseif k == 'SPOTTER_VOLUME' then C.spotVol = tonumber(v) or C.spotVol
-        elseif k == 'BG_VOLUME' then C.bgVol = tonumber(v) or C.bgVol
-        elseif k == 'SPEED' then C.speed = tonumber(v) or C.speed
-        elseif k == 'PITCH' then C.pitch = tonumber(v) or C.pitch
-        elseif k == 'RESERVE' then C.reserve = tonumber(v) or C.reserve
-        elseif k == 'SPOTTER' then C.spotOn = v == '1'
-        elseif k == 'BEEP' then C.playBeep = v == '1'
-        elseif k == 'FLAGS' then C.warnFlags = v == '1'
-        elseif k == 'FUEL' then C.warnFuel = v == '1'
-        elseif k == 'TYRES' then C.warnTyres = v == '1'
-        elseif k == 'DAMAGE' then C.warnDamage = v == '1'
-        elseif k == 'SUMMARY' then C.warnSummary = v == '1'
-        elseif k == 'BRIEF_EVERY' then
-          C.briefEvery = math.max(1, math.min(5, math.floor(tonumber(v) or C.briefEvery)))
-        elseif k == 'FUEL_STATUS_SECONDS' then
-          C.fuelStatusSeconds = math.max(60, math.min(300,
-            math.floor(tonumber(v) or C.fuelStatusSeconds)))
-        elseif k == 'RANTS' then
-          C.rantLevel = math.max(0, math.min(3, math.floor(tonumber(v) or C.rantLevel)))
-        elseif k == 'SHOW_AVATAR' then C.showAvatar = v == '1'
-        elseif k == 'RACE_COMMENTARY' then C.raceCommentary = v == '1'
-        elseif k == 'LANGUAGE' then
-          if v == 'en-US' or v == 'pt-BR' then C.language = v end
-        end
+    pcall(function()
+      local section
+      for line in file:lines() do
+        local s = line:match('^%s*%[(.-)%]%s*$')
+        if s then section = s end
+        local k, v = line:match('^%s*([%w_]+)%s*=%s*(.-)%s*$')
+        if k and section == 'SALLY' then
+          if k == 'ENGINEER_VOLUME' then C.engVol = tonumber(v) or C.engVol
+          elseif k == 'SPOTTER_VOLUME' then C.spotVol = tonumber(v) or C.spotVol
+          elseif k == 'BG_VOLUME' then C.bgVol = tonumber(v) or C.bgVol
+          elseif k == 'SPEED' then C.speed = tonumber(v) or C.speed
+          elseif k == 'PITCH' then C.pitch = tonumber(v) or C.pitch
+          elseif k == 'RESERVE' then C.reserve = tonumber(v) or C.reserve
+          elseif k == 'SPOTTER' then C.spotOn = v == '1'
+          elseif k == 'BEEP' then C.playBeep = v == '1'
+          elseif k == 'FLAGS' then C.warnFlags = v == '1'
+          elseif k == 'FUEL' then C.warnFuel = v == '1'
+          elseif k == 'TYRES' then C.warnTyres = v == '1'
+          elseif k == 'DAMAGE' then C.warnDamage = v == '1'
+          elseif k == 'SUMMARY' then C.warnSummary = v == '1'
+          elseif k == 'BRIEF_EVERY' then
+            C.briefEvery = math.max(1, math.min(5, math.floor(tonumber(v) or C.briefEvery)))
+          elseif k == 'FUEL_STATUS_SECONDS' then
+            C.fuelStatusSeconds = math.max(60, math.min(300,
+              math.floor(tonumber(v) or C.fuelStatusSeconds)))
+          elseif k == 'RANTS' then
+            C.rantLevel = math.max(0, math.min(3, math.floor(tonumber(v) or C.rantLevel)))
+          elseif k == 'SHOW_AVATAR' then C.showAvatar = v == '1'
+          elseif k == 'RACE_COMMENTARY' then C.raceCommentary = v == '1'
+          elseif k == 'LANGUAGE' then
+            if v == 'en-US' or v == 'pt-BR' then C.language = v end
+          end
       end
-    end
-    file:close()
+      end
+    end)
+    pcall(function() file:close() end)
   end
 end
 L:set(C.language)
 
 local clock = 0
-local rpCutWarnings, rpWarningVersion = nil, 0
-local rpChatSubscription
-if ac and type(ac.onChatMessage) == 'function' then
-  local ok, subscription = pcall(ac.onChatMessage, function(message, senderCarIndex)
-    if senderCarIndex == 0 then
-      local count, total = tostring(message or ''):lower():match(
-        '^%s*rp:cutting warnings:%s*(%d+)%s*/%s*(%d+)%s*$')
-      count, total = tonumber(count), tonumber(total)
-      if count and total and count >= 1 and total >= 1 and count <= total and total <= 20 then
-        rpWarningVersion = rpWarningVersion + 1
-        rpCutWarnings = { count = count, total = total, version = rpWarningVersion }
-      end
-    end
-    return false
-  end)
-  if ok then
-    rpChatSubscription = subscription
-    script.rpChatSubscription = subscription
-  end
-end
 local lastCoachAt, lastCoachPhrase, coachLapPosition, coachPreviousLapMs = -1e9, nil, nil, nil
 local pendingCoach, sessionStartedAt = nil, 0
 local lastNoncriticalAt, lastSpotterAt, budgetGroup = -1e9, -1e9, nil
@@ -183,28 +169,35 @@ end
 local dirty, dirtyTimer = false, 0
 local function save()
   local ok, file = pcall(io.open, settingsPath, 'w')
-  if not ok or not file then return end
-  file:write('[SALLY]\n')
-  file:write('ENGINEER_VOLUME = ' .. tostring(C.engVol) .. '\n')
-  file:write('SPOTTER_VOLUME = ' .. tostring(C.spotVol) .. '\n')
-  file:write('BG_VOLUME = ' .. tostring(C.bgVol) .. '\n')
-  file:write('SPEED = ' .. tostring(C.speed) .. '\n')
-  file:write('PITCH = ' .. tostring(C.pitch) .. '\n')
-  file:write('RESERVE = ' .. tostring(C.reserve) .. '\n')
-  file:write('SPOTTER = ' .. (C.spotOn and '1' or '0') .. '\n')
-  file:write('BEEP = ' .. (C.playBeep and '1' or '0') .. '\n')
-  file:write('FLAGS = ' .. (C.warnFlags and '1' or '0') .. '\n')
-  file:write('FUEL = ' .. (C.warnFuel and '1' or '0') .. '\n')
-  file:write('TYRES = ' .. (C.warnTyres and '1' or '0') .. '\n')
-  file:write('DAMAGE = ' .. (C.warnDamage and '1' or '0') .. '\n')
-  file:write('SUMMARY = ' .. (C.warnSummary and '1' or '0') .. '\n')
-  file:write('BRIEF_EVERY = ' .. tostring(C.briefEvery) .. '\n')
-  file:write('FUEL_STATUS_SECONDS = ' .. tostring(C.fuelStatusSeconds) .. '\n')
-  file:write('RANTS = ' .. tostring(C.rantLevel) .. '\n')
-  file:write('SHOW_AVATAR = ' .. (C.showAvatar and '1' or '0') .. '\n')
-  file:write('RACE_COMMENTARY = ' .. (C.raceCommentary and '1' or '0') .. '\n')
-  file:write('LANGUAGE = ' .. tostring(C.language) .. '\n')
-  file:close()
+  if not ok or not file then return false end
+  local saved = pcall(function()
+    file:write('[SALLY]\n')
+    file:write('ENGINEER_VOLUME = ' .. tostring(C.engVol) .. '\n')
+    file:write('SPOTTER_VOLUME = ' .. tostring(C.spotVol) .. '\n')
+    file:write('BG_VOLUME = ' .. tostring(C.bgVol) .. '\n')
+    file:write('SPEED = ' .. tostring(C.speed) .. '\n')
+    file:write('PITCH = ' .. tostring(C.pitch) .. '\n')
+    file:write('RESERVE = ' .. tostring(C.reserve) .. '\n')
+    file:write('SPOTTER = ' .. (C.spotOn and '1' or '0') .. '\n')
+    file:write('BEEP = ' .. (C.playBeep and '1' or '0') .. '\n')
+    file:write('FLAGS = ' .. (C.warnFlags and '1' or '0') .. '\n')
+    file:write('FUEL = ' .. (C.warnFuel and '1' or '0') .. '\n')
+    file:write('TYRES = ' .. (C.warnTyres and '1' or '0') .. '\n')
+    file:write('DAMAGE = ' .. (C.warnDamage and '1' or '0') .. '\n')
+    file:write('SUMMARY = ' .. (C.warnSummary and '1' or '0') .. '\n')
+    file:write('BRIEF_EVERY = ' .. tostring(C.briefEvery) .. '\n')
+    file:write('FUEL_STATUS_SECONDS = ' .. tostring(C.fuelStatusSeconds) .. '\n')
+    file:write('RANTS = ' .. tostring(C.rantLevel) .. '\n')
+    file:write('SHOW_AVATAR = ' .. (C.showAvatar and '1' or '0') .. '\n')
+    file:write('RACE_COMMENTARY = ' .. (C.raceCommentary and '1' or '0') .. '\n')
+    file:write('LANGUAGE = ' .. tostring(C.language) .. '\n')
+    local flushed, flushError = file:flush()
+    if not flushed then error(flushError or 'Nao foi possivel gravar as configuracoes') end
+    local closed, closeError = file:close()
+    if not closed then error(closeError or 'Nao foi possivel fechar as configuracoes') end
+  end)
+  if not saved then pcall(function() file:close() end); return false end
+  return true
 end
 local function markDirty() dirty, dirtyTimer = true, 0 end
 
@@ -267,9 +260,10 @@ local function queueHit(withCar, previous)
     preEngineLife = previous and previous.engLife or nil }
 end
 -- O callback do CSP captura contatos que podem durar apenas poucos frames.
-if ac.onCarCollision then
+if ac and type(ac.onCarCollision) == 'function' then
   local ok, subscription = pcall(ac.onCarCollision, 0, function()
-    local car = ac.getCar and ac.getCar(0) or nil
+    local car
+    pcall(function() if ac and ac.getCar then car = ac.getCar(0) end end)
     local withCar = -1
     if car then pcall(function() withCar = tonumber(car.collidedWith) or -1 end) end
     queueHit(withCar, lastS)
@@ -337,7 +331,7 @@ local function spotSay(line, test)
 end
 
 ------------------------------------------------------------
--- Acoes (controles restantes: tudo automatico, sem botoes manuais)
+-- Acoes de rádio, testes manuais e controles da interface.
 ------------------------------------------------------------
 local SPOT_LINES = { 'car_left', 'car_right', 'still_there', 'clear_left',
   'clear_right', 'all_clear', 'three_wide', 'three_wide_on_left', 'three_wide_on_right' }
@@ -370,6 +364,12 @@ function A.tRadio()
     message(L:t('msg.testradio'))
   end
   rep.api.done()
+  return true
+end
+function A.tPenalty()
+  if mutedReplay or not C.voiceOn or not sally:available() then return false end
+  rep.api.manual()
+  Rep.penalty(rep, lastS)
   return true
 end
 function A.spotTest(line)
@@ -474,7 +474,6 @@ function A.save() markDirty() end
 -- Loop
 ------------------------------------------------------------
 local function resetAll(reason)
-  rpCutWarnings, rpWarningVersion = nil, 0
   strat:reset(C.reserve)
   warner:reset()
   spotSt = Spot.newState()
@@ -495,7 +494,8 @@ function script.update(dt) updateApp(dt) end
 function updateApp(dt)
   dt = math.max(0, tonumber(dt) or 0)
   clock = clock + dt
-  local sim = ac.getSim and ac.getSim() or nil
+  local sim
+  pcall(function() if ac and ac.getSim then sim = ac.getSim() end end)
   local replaying = false
   pcall(function() replaying = sim and sim.isReplayActive == true end)
   if replaying then
@@ -510,7 +510,9 @@ function updateApp(dt)
     end
     if dirty then
       dirtyTimer = dirtyTimer + dt
-      if dirtyTimer > 1 then dirty = false; save() end
+      if dirtyTimer > 1 then
+        if save() then dirty = false else dirtyTimer = 0 end
+      end
     end
     return
   elseif mutedReplay then
@@ -554,7 +556,6 @@ function updateApp(dt)
     S.hit = nil
   end
   lastToken = token
-  S.rpCutWarnings = rpCutWarnings
 
   local lapCompleted = lastLap >= 0 and (S.lap or 0) > lastLap
   if coachLapPosition == nil then coachLapPosition = S.pos end
@@ -626,7 +627,9 @@ function updateApp(dt)
 
   if dirty then
     dirtyTimer = dirtyTimer + dt
-    if dirtyTimer > 1 then dirty = false; save() end
+    if dirtyTimer > 1 then
+      if save() then dirty = false else dirtyTimer = 0 end
+    end
   end
 end
 
@@ -638,7 +641,8 @@ function windowMain(dt)
   local playing = V.playing and V.playing.entry
   local frames = avatarFrames and (avatarFrames[cap.expression] or avatarFrames.neutral)
   UI.box({ text = cap.text, speaker = cap.speaker, alpha = cap.alpha,
-    talking = playing ~= nil and not playing.isBeep and playing.speaker == 'SALLY',
+    talking = playing ~= nil and not playing.isBeep
+      and (playing.speaker == 'SALLY' or playing.speaker == 'SPOTTER'),
     animationTime = clock, avatarIdle = frames and frames.idle,
     avatarTalking = frames and frames.talking },
     C, spotSt, L)

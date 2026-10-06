@@ -88,12 +88,30 @@ local function spotState(st, enabled, L)
   return text, color
 end
 
-local function penaltyState(kind, L)
+local function penaltyState(kind, param, returnToPits, L)
+  if returnToPits and (kind == nil or kind == 0 or kind == 5) then
+    return L:t('dash.penalty_return'), PALETTE.red
+  end
   if kind == nil then return L:t('dash.penalty_na'), PALETTE.muted end
   if kind == 0 then return L:t('dash.penalty_none'), PALETTE.green end
-  if kind == 1 then return L:t('dash.penalty_pits'), PALETTE.amber end
-  if kind == 2 then return L:t('dash.penalty_return'), PALETTE.red end
-  if kind == 3 then return L:t('dash.penalty_slow'), PALETTE.amber end
+  if kind == 1 then
+    if param and param > 0 then
+      return string.format(L:t('dash.penalty_pits_laps'), math.floor(param + 0.5)), PALETTE.amber
+    end
+    return L:t('dash.penalty_pits'), PALETTE.amber
+  end
+  if kind == 2 then
+    if param and param > 0 then
+      return string.format(L:t('dash.penalty_wait_time'), math.floor(param + 0.5)), PALETTE.red
+    end
+    return L:t('dash.penalty_pit_wait'), PALETTE.red
+  end
+  if kind == 3 then
+    if param and param > 0 then
+      return string.format(L:t('dash.penalty_slow_time'), math.floor(param + 0.5)), PALETTE.amber
+    end
+    return L:t('dash.penalty_slow'), PALETTE.amber
+  end
   if kind == 4 then return L:t('dash.penalty_black'), PALETTE.red end
   if kind == 5 then return L:t('dash.penalty_cleared'), PALETTE.green end
   return L:t('dash.penalty_unknown'), PALETTE.amber
@@ -104,7 +122,7 @@ function UI.box(cap, C, st, L)
   local alpha = cap.alpha or 0
   local size = ui.windowSize()
   local active = alpha > 0.01
-  local showAvatar = active and C.showAvatar and cap.speaker == 'SALLY' and cap.avatarIdle
+  local showAvatar = active and C.showAvatar and cap.avatarIdle
   local accent = active and rgbm(C.accR, C.accG, C.accB, alpha) or PALETTE.gold
   local spotText, spotColor = spotState(st, C.spotOn, L)
 
@@ -237,7 +255,8 @@ function UI.dash(S, G, st, C, A, history, message, L, diag)
   end
 
   section(L:t('dash.vehicle'), L)
-  local penalty, penaltyColor = penaltyState(S.penaltyType, L)
+  local penalty, penaltyColor = penaltyState(S.penaltyType, S.penaltyParameter,
+    S.returnToPits, L)
   local hitDetail = L:t('dash.hit_none')
   if diag and diag.hit and diag.hit.data and (diag.now or 0) - diag.hit.at < 120 then
     local hit = diag.hit.data
@@ -322,6 +341,10 @@ function UI.settings(C, A, sally, V, st, counts, diag, L, avatarFrames)
       { 'surprised', 'avatar.surprised' },
       { 'relieved', 'avatar.relieved' },
       { 'determined', 'avatar.determined' },
+      { 'alert', 'avatar.alert' },
+      { 'celebrating', 'avatar.celebrating' },
+      { 'confused', 'avatar.confused' },
+      { 'disappointed', 'avatar.disappointed' },
     }
     for i, preview in ipairs(previews) do
       local frame = avatarFrames[preview[1]]
@@ -350,6 +373,7 @@ function UI.settings(C, A, sally, V, st, counts, diag, L, avatarFrames)
   if ui.button(L:t('set.t_seq')) then A.spotSeq() end
   ui.sameLine()
   if ui.button(L:t('set.t_clearq')) then A.clearQueue() end
+  if ui.button(L:t('set.t_penalty')) then A.tPenalty() end
 
   local spotText, spotColor = spotState(st, C.spotOn, L)
   ui.textColored(L:t('set.spotst') .. spotText .. '  L:' .. (st.left or 0) .. '  R:' .. (st.right or 0), spotColor)
@@ -359,8 +383,9 @@ function UI.settings(C, A, sally, V, st, counts, diag, L, avatarFrames)
     ui.textColored(L:t('set.telemetry'), PALETTE.muted)
     ui.text(L:t('set.t_fuel') .. fmt(S.fuel, L:t('unit.fuel_l')) .. L:t('set.t_cons')
       .. fmt(G.perLap, L:t('unit.cons_short')))
-    ui.text(L:t('set.t_dmg') .. fmt(S.dmgTotal, '%.1f') .. L:t('set.t_pen')
-      .. (S.penaltyType == nil and L:t('set.t_na') or tostring(S.penaltyType)))
+    local penalty = S.penaltyType == nil and L:t('set.t_na') or tostring(S.penaltyType)
+    if S.penaltyParameter ~= nil then penalty = penalty .. ' / ' .. tostring(S.penaltyParameter) end
+    ui.text(L:t('set.t_dmg') .. fmt(S.dmgTotal, '%.1f') .. L:t('set.t_pen') .. penalty)
     if diag.hit and diag.hit.data and (diag.now or 0) - diag.hit.at < 120 then
       local hit = diag.hit.data
       ui.textColored(string.format(L:t('set.t_hit'), hit.damageDelta or 0, hit.speedDrop or 0), PALETTE.amber)

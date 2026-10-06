@@ -9,7 +9,7 @@ Legenda: ✅ ligado · 🔶 dá para ligar (com ideia de gatilho) · ❌ nunca (
 
 ## 🔶 Dá para ligar (diga quais quer)
 
-- `penalties` por motivo fino residual (cut_track/stop_go por nome fora do contexto) — motivo exato não vem no dado; contexto (box/largada/azul) + parâmetro de espera já cobrem Real Penalty (`dt`/`sg10`).
+- `penalties` por motivo fino de infração — o motivo exato nem sempre está nos campos de penalidade fornecidos pelo jogo.
 - `penalties` contagem regressiva (one_lap_to_serve…) — semântica do parâmetro incerta.
 - `lap_counter/end_of_session_pole` — `racePosition` não confirma a classificação do qualifying.
 - Setores rápidos avulsos fora do roxo — precisa delta ao vivo do setor atual.
@@ -29,8 +29,4 @@ Rally (`codriver`, `corners`, `pace_notes`), ovais USA (`frozen_order`, `fc_yell
 
 ## ✅ Ligado (resumo)
 
-Spotter (10 linhas + variações), combustível (nível, autonomia, degraus 4/3/2/1 voltas e 10/5/2 min, meio-tanque, crítico, box), gaps (frente/atrás/líder, segundos+metros, tendências), batalha, posição (P1/pole/líder/último/voltas de vantagem), fim de sessão e corrida, voltas (recorde/boa/tempo, validade, cortes), avisos de corte RP por contagem, setores reais do jogo + roxo pessoal + elogio quando os três setores ficam bons, ritmo melhorando/piorando, pneus (quente/morno/frio, pressão, inner/outer, stint, desgaste %, composto, freios), danos (toque/leve/grave, suspensão, câmbio), motor (óleo/água), clima/chuva, box (pedido, equipe pronta, serviço concluído), bandeiras, pênaltis (Stop & Go genérico quando o motivo não está confirmado, e aviso quando cumprido), relógio, largada, push, spin, rant, ERS/bateria baixa/crítica, DRS, limitador, xingamento, catálogo.
-
-## RealPenalty
-
-A instalação do servidor tem `sg10` configurado. O CSP oferece `ac.onChatMessage`; os logs do RealPenalty mostram o formato `RP:Cutting warnings: N/M`, que a Sally lê apenas quando a mensagem vem do carro do jogador e deixa visível no chat. Não apareceu uma mensagem explícita de Stop & Go cumprido ou equipe pronta. Esses eventos usam os campos nativos já lidos pela Sally: Stop & Go quando o carro informa tipo `2` com espera entre 1 e 120 segundos; equipe pronta após um pedido de box seguido de entrada; e liberação depois do serviço de pneus, reparo ou combustível. A compatibilidade do Stop & Go depende de o servidor refletir a penalidade nesses campos; a mensagem de corte, sozinha, não confirma esse evento.
+Spotter (10 linhas + variações), combustível (nível, autonomia, degraus 4/3/2/1 voltas e 10/5/2 min, meio-tanque, crítico, box), gaps (frente/atrás/líder, segundos+metros, tendências), batalha, posição (P1/pole/líder/último/voltas de vantagem), fim de sessão e corrida, voltas (recorde/boa/tempo, validade, cortes), avisos de volta inválida e cortes detectados pela telemetria do jogo, setores reais do jogo + roxo pessoal + elogio quando os três setores ficam bons, ritmo melhorando/piorando, pneus (quente/morno/frio, pressão, inner/outer, stint, desgaste %, composto, freios), danos (toque/leve/grave, suspensão, câmbio), motor (óleo/água), clima/chuva, box (pedido, equipe pronta, serviço concluído), bandeiras, penalidades nativas do simulador (parada obrigatória, retorno e espera nos boxes, redução de velocidade, bandeira preta e liberação conforme os campos disponíveis), relógio, largada, push, spin, rant, ERS/bateria baixa/crítica, DRS, limitador, xingamento, catálogo.

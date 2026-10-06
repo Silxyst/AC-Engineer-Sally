@@ -481,10 +481,20 @@ function Rep:penalty(S)
   api.started('penalty')
   local kind = S and S.penaltyType
   local param = S and S.penaltyParameter
-  if kind == nil then
+  if kind == 2 then
+    api.say('penalties', 'you_have_a_penalty', 'Aguarde nos boxes', {})
+    if param and param > 0 then
+      api.num(param)
+      api.say('timings', 'seconds', 'segundos', { noBeep = true })
+    end
+  elseif S and S.returnToPits and (kind == nil or kind == 0 or kind == 5) then
+    api.say('penalties', 'you_have_a_penalty', 'Retorne aos boxes para cumprir a penalidade', {})
+  elseif kind == nil then
     api.say('acknowledge', 'no_data', 'Sem dado de penalidade', {})
-  elseif kind == 0 or kind == 5 then
+  elseif kind == 0 then
     api.say('penalties', 'you_dont_have_a_penalty', 'Sem penalidade', {})
+  elseif kind == 5 then
+    api.say('penalties', 'penalty_served', 'Penalidade liberada', {})
   elseif kind == 3 then
     api.say('penalties', 'new_penalty_slowdown', 'Reduza para cumprir a penalidade', {})
     if param and param > 0 then
@@ -492,26 +502,7 @@ function Rep:penalty(S)
       api.say('timings', 'seconds', 'segundos', { noBeep = true })
     end
   elseif kind == 4 then
-    if S and (S.dmgTotal or 0) > 30 then
-      api.say('penalties', 'meatball_flag', 'Bandeira laranja', {})
-    else
-      api.say('penalties', 'new_penalty_black_flag', 'Bandeira preta', {})
-    end
-  elseif kind == 2 then
-    local sgSecs = param and param > 0 and param <= 120 and param or nil
-    if sgSecs and S and S.inPit then
-      api.say('penalties', 'stop_go_penalty_speeding_in_pit_lane', 'Stop&go no box', {})
-    elseif sgSecs then
-      api.say('penalties', 'stop_go_penalty_cutting_track', 'Stop&go por corte', {})
-    elseif S and S.inPit then
-      api.say('penalties', 'drive_through_speeding_in_pit_lane', 'Excesso no box', {})
-    else
-      api.say('penalties', 'new_penalty_drivethrough', 'Drive-through', {})
-    end
-    if param and param > 0 then
-      api.num(param)
-      api.say('timings', 'seconds', 'segundos', { noBeep = true })
-    end
+    api.say('penalties', 'new_penalty_black_flag', 'Bandeira preta', {})
   elseif kind == 1 then
     api.say('penalties', 'you_have_a_penalty', 'Parada obrigatória', {})
     if param and param > 0 then
