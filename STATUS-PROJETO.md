@@ -29,7 +29,7 @@
 | Penalidades nativas | **Leitura dos campos do jogo implementada; validação em pista pendente** | Conferir atribuição, lembrete e cumprimento com penalidades fornecidas pelo Assetto/CSP. |
 | Integridade dos arquivos de áudio | **Verificado estaticamente** | Audição manual de uma amostra e confirmação de que os áudios escolhidos são os desejados. |
 | IA online | **Removida do fluxo atual** | Nenhuma chave/API é necessária para o funcionamento descrito no README. |
-| Commit/publicação das alterações locais | **Pendente** | Revisar e decidir quando registrar/publicar as alterações locais. |
+| Commit/publicação das alterações locais | **Publicado no GitHub** | Código, expressões, áudios e documentação publicados na branch `main`; a validação final dentro do jogo continua pendente. |
 
 ## Formulário detalhado por componente
 

@@ -69,7 +69,19 @@ Voz gravada, telemetria ao vivo e uma central para acompanhar seu stint.</p>
 <p>Interface e legendas em PT-BR ou inglês, volumes separados e ajustes de voz. O áudio Sally é gravado em inglês e roda localmente; regras de telemetria escolhem comentários de corrida sem internet.</p>
 </td>
 </tr>
+<tr>
+<td valign="top">
+<h3>🎭 Sally na tela</h3>
+<p>Personagem 2D com fundo transparente, imagens para repouso e fala e até 14 expressões ligadas ao tipo de áudio. A exibição e a prévia das expressões ficam nos ajustes.</p>
+</td>
+<td valign="top">
+<h3>🏁 Reação ao resultado</h3>
+<p>Ao terminar uma corrida, Sally escolhe uma chamada gravada conforme a posição final, incluindo vitória, pódio, boa chegada ou último lugar. As falas de resultado têm legendas.</p>
+</td>
+</tr>
 </table>
+
+> 🧪 **Validação em jogo:** arquivos, referências de áudio e mapeamentos foram conferidos. A troca visual das expressões e o disparo das reações de chegada ainda precisam ser confirmados numa corrida no Assetto Corsa/CSP.
 
 ### Mais detalhes que fazem diferença
 
@@ -77,6 +89,7 @@ Voz gravada, telemetria ao vivo e uma central para acompanhar seu stint.</p>
 - **Chuva e recursos do carro:** alertas de condições, DRS, ERS e push-to-pass quando os dados correspondentes estiverem disponíveis.
 - **Teste direto no app:** Radio check, testes do spotter, sequência de chamadas e catálogo de frases.
 - **Comentários por telemetria:** regras locais escolhem clips Sally já gravados após voltas válidas em treino, qualificação ou corrida, considerando ritmo e posição. Não usa IA online, chave ou internet.
+- **Penalidades nativas:** Sally lê os dados de penalidade expostos pelo Assetto Corsa/CSP e escolhe a chamada correspondente quando eles estão disponíveis. Não há integração com o mod Real Penalty.
 - **Preferências locais:** seus ajustes ficam em `user_settings.ini` e são preservados entre usos.
 - **Pack incluído:** 25 categorias e **6.222 WAVs Sally**, armazenados com Git LFS.
 
@@ -191,7 +204,7 @@ O rádio, os avisos e os comentários por telemetria funcionam localmente, sem i
 <details>
 <summary><strong>🏎️ Todos os carros terão os mesmos avisos?</strong></summary>
 <br>
-Os avisos dependem dos recursos e da telemetria expostos pelo carro, pelo mod e pelo CSP. DRS, ERS, desgaste, motor, clima e penalidades exigem os dados correspondentes.
+Os avisos dependem dos recursos e da telemetria expostos pelo carro, pelo mod e pelo CSP. DRS, ERS, desgaste, motor, clima e penalidades exigem os dados correspondentes. Para penalidades, Sally usa os campos nativos do jogo/CSP; o mod Real Penalty não é integrado.
 </details>
 
 <details>

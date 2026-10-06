@@ -32,8 +32,12 @@ Prerecorded voice, live telemetry, and a dedicated race hub.</p>
 | **Race hub** | Fuel, range, remaining laps, last/best lap, tyres, spotter status and radio history. |
 | **Local audio** | English Sally voice clips, PT-BR/English interface and captions, independent volumes and playback settings. |
 | **Telemetry commentary** | Local rules select existing Sally recordings after valid laps in practice, qualifying or race, using pace and position; no internet or API key is needed. |
+| **2D Sally avatar** | Transparent character art with idle and speaking images; up to 14 expressions are mapped to audio types and can be previewed or hidden in Settings. |
+| **Race-finish reaction** | At the end of a race, Sally selects a recorded call for the final position, including a win, podium, good finish or last place. Result calls have captions. |
 
 The pack includes **25 categories and 6,222 Sally WAVs**, stored with Git LFS. Radio playback uses priorities, cooldowns and message expiry. Weather, DRS, ERS and push-to-pass calls depend on available telemetry.
+
+> 🧪 **In-game check:** image/audio mappings have been checked. Expression changes on screen and race-finish triggers still need confirmation in an Assetto Corsa/CSP session.
 
 <a id="install"></a>
 ## 📥 Installation
@@ -78,6 +82,7 @@ Keep the directory name **`AC-Engineer-Sally`** and entry filename **`AC-Enginee
 - Radio check, spotter tests, call sequence, queue clearing and phrase catalog.
 - Optional Rants level `0–3`; distributed defaults use `0` (off). Some clips in the pack contain explicit language.
 - Local telemetry commentary: selects existing recordings after valid laps based on pace and position. No online AI, API key or internet connection is used.
+- Sally's 2D avatar can be shown or hidden, and its expressions can be previewed in Settings.
 
 `config.ini` supplies defaults. Changes made in the app are saved locally to `user_settings.ini`, which overrides defaults and is excluded from Git.
 
@@ -105,7 +110,7 @@ The radio, alerts and telemetry commentary run locally and work without an inter
 <details>
 <summary><strong>Why are some calls unavailable on my car?</strong></summary>
 <br>
-Calls depend on the features and telemetry exposed by the car, mod and CSP. DRS, ERS, wear, engine, weather and penalty calls require the corresponding data. Fuel estimates improve as you complete laps.
+Calls depend on the features and telemetry exposed by the car, mod and CSP. DRS, ERS, wear, engine, weather and penalty calls require the corresponding data. Penalties use native Assetto Corsa/CSP data; the Real Penalty mod is not integrated. Fuel estimates improve as you complete laps.
 </details>
 
 <details>
